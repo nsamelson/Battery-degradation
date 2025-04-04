@@ -23,9 +23,9 @@ for i, (fb, fs, duration, resp, exc) in enumerate(zip(fbs, fss, durations, respo
     time = np.linspace(0, duration, len(resp))
     
     # Plot response and excitation on the same subplot
-    ax.plot(time, resp, color=colors[i], linestyle=linestyles[0], alpha=0.4, label=f'Response (fs={fs})')
-    ax.plot(time, exc, color=colors[i], linestyle=linestyles[1],  label=f'Excitation (fs={fs})')
-    ax.set_title(f'Response & Excitation (fb={fb})')
+    ax.plot(time, resp, color=colors[i], linestyle=linestyles[0], alpha=0.4, label=f'Response')
+    ax.plot(time, exc, color=colors[i], linestyle=linestyles[1],  label=f'Excitation')
+    ax.set_title(f'Response & Excitation (fb={fb}, fs={fs})')
     ax.set_xlim([0, time[-1]])
     ax.legend()
     ax.grid(True)
