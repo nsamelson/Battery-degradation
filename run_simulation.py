@@ -82,7 +82,7 @@ def main(I, parameters:dict, apply_noise=False):
     # Output parameters
     responses = []
 
-    for i in enumerate(tqdm(fbs)):
+    for i in enumerate(fbs):
 
         # generate output response
         y = sim_z(Rs, R, C, alpha, fss, I)
