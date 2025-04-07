@@ -1,10 +1,15 @@
+import jax
 import vb_eis.state_space_sim as state_space_sim
-import torch
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
 from tqdm import trange, tqdm
+
+# Set global seed
+np.random.seed(42)
+jax_key = jax.random.PRNGKey(42)
+
 
 
 def estimate_pdf(u_cof, i_cof):
@@ -35,21 +40,21 @@ def drbsgen(fs, fb, prbs_length):
     seed - set seed for random number generator (in order to exactly recreate results) 
     """
 
-    f_prbs = 3*fb;
+    f_prbs = 3*fb
     N = int(np.around(fs/f_prbs, decimals=0))
-    Ns = int(np.ceil((prbs_length*fs)/N));
-    lb = int(np.ceil(prbs_length*fs));
+    Ns = int(np.ceil((prbs_length*fs)/N))
+    lb = int(np.ceil(prbs_length*fs))
     prbs = np.ones(int(lb))#*np.nan;
     
     for idx in range(1,Ns):
-        x = np.around(np.random.uniform(0,1),decimals=0);
+        x = np.around(np.random.uniform(0,1),decimals=0)
         if(x==0):
-            x = 0;
-        prbs[((idx-1)*N+1):idx*N+1] = x;
+            x = 0
+        prbs[((idx-1)*N+1):idx*N+1] = x
    
-    t = np.arange(0,len(prbs))/fs;
-    t = t[0:lb];
-    prbs = np.append(prbs[1:lb],prbs[-1]);
+    t = np.arange(0,len(prbs))/fs
+    t = t[0:lb]
+    prbs = np.append(prbs[1:lb],prbs[-1])
     return prbs,t
 
 
@@ -59,42 +64,36 @@ def sim_z(Rs, R, C, alfa,fs, I):
     x_init = jnp.zeros(A.shape)
     return state_space_sim.forward_sim(A, bl, m, d, x_init, I, mask)
 
+def add_white_noise(data, noise_level, key):
+    return data + noise_level * jax.random.normal(key, data.shape)
 
 
-def main():
-    # Simulation frequency parameters
-    fbs = np.array([1]) # base signal frequency
-    durations = [10]    # duration of the sampling (s)
-    fss = [200]         # sampling frequency
 
-    # Electrical circuit blocks
-    Rs = jnp.array(3.)                      # Resistance of supply?
-    R = jnp.array([1., 2., 3.])             # Resistance
-    C = jnp.array([.1, 1., 10.])            # Capacitance
-    alfa = jnp.array([0.88, 0.82, 0.99])    # Fractional factor linked with the capacitance
+def main(I, parameters:dict, apply_noise=False):
 
-    params = {
-        "fbs": fbs,
-        "durations": durations,
-        "fss": fss,
-        "Rs": Rs,
-        "R": R,
-        "C": C,
-        "alfa": alfa
-    }
+    fbs = parameters["fbs"]
+    fss = parameters["fss"]
+
+    Rs = parameters["Rs"]
+    R = parameters["R"]
+    C = parameters["C"]
+    alpha = parameters["alpha"]
 
     # Output parameters
-    excitation = []
-    response = []
+    responses = []
 
-    for i,fb in enumerate(tqdm(fbs)):
-        prbs,t = drbsgen(fss[i], fb, durations[i])
-        I = jnp.array(prbs)
-        y = sim_z(Rs, R, C, alfa,  fss[i], I)
-        excitation.append(jnp.asarray(I, copy=True))
-        response.append(jnp.asarray(y, copy=True))
+    for i in enumerate(tqdm(fbs)):
 
-    np.savez("output/simulation_data.npz", response=response, excitation=excitation, params=params, allow_pickle=True)
+        # generate output response
+        y = sim_z(Rs, R, C, alpha, fss, I)
+
+        # add noise
+        if apply_noise:
+            y = add_white_noise(y, 0.01, jax.random.fold_in(jax_key, i + 100))
+
+        responses.append(jnp.asarray(y, copy=True))
+
+    return responses
 
 
 if __name__ == "__main__":
