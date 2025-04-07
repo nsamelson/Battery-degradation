@@ -6,11 +6,12 @@ from sklearn.metrics import mean_squared_error
 
 import run_simulation
 
+    # Simulation frequency parameters
+    # fbs = np.array([1]) # bandwidths of the DRBS signal
+    # durations = [10]    # duration of the sampling (s)
+    # fss = [2000]         # sampling frequency
 
 
-def compute_bic(n, mse, num_params):
-    bic = n * np.log(mse) + num_params * np.log(n)
-    return bic
 
 
 # MATLAB loader function
@@ -19,6 +20,9 @@ def load_matlab_data(filename):
         data = {key: f[key][()] for key in f.keys()}
     return data
 
+def compute_bic(n, mse, num_params):
+    bic = n * np.log(mse) + num_params * np.log(n)
+    return bic
 
 def main():
 
@@ -29,23 +33,14 @@ def main():
     durations = data.get("duration")[0]
     fss = data.get("fs")[0]
 
-
     # bandwidth freq
     fbs = np.array([30000])
 
-
-    # Simulation frequency parameters
-    # fbs = np.array([1]) # bandwidths of the DRBS signal
-    # durations = [10]    # duration of the sampling (s)
-    # fss = [2000]         # sampling frequency
-
     # Electrical circuit blocks
-    Rs = jnp.array(3.)                      # Resistance of supply?
-    R = jnp.array([1., 2., 3.])             # Resistance
-    C = jnp.array([.1, 1., 10.])            # Capacitance
-    alpha = jnp.array([0.88, 0.82, 0.99])    # Fractional factor linked with the capacitance
-
-    print(Rs)
+    Rs = jnp.array(300.)                      # Resistance of supply?
+    R = jnp.array([1., 20.])             # Resistance
+    C = jnp.array([.1, 10.])            # Capacitance
+    alpha = jnp.array([0.88, 0.52])    # Fractional factor linked with the capacitance
 
     params = {
         "fbs": fbs,
@@ -66,11 +61,10 @@ def main():
     num_params = 1 + len(R) + len(C) + len(alpha)
     bic = compute_bic(n,mse,num_params)
 
-    print(bic, mse)
-
+    print(bic, mse, num_params)
 
     # Save file
-    np.savez("output/signals.npz",x=I,y_true=y_true, y_pred=y_pred, params= params, allow_pickle=True)
+    np.savez("output/signals.npz",x=I, y_true=y_true, y_pred=y_pred, params= params, allow_pickle=True)
 
 
 
