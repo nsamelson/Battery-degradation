@@ -10,7 +10,7 @@ from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.hyperopt import HyperOptSearch
 from ray.air import session, config, ScalingConfig
 
-
+import run_model
 
 def custom_trial_dirname_creator(trial):
     # Create a shorter name for the trial directory
@@ -18,7 +18,7 @@ def custom_trial_dirname_creator(trial):
 
 
 
-def main(model_name, dataset_path, num_samples=1 ):
+def main(model_name, dataset_path, num_samples=1, gpus_per_trial=float(1/4) ):
 
     # create dirs and stuff
     work_dir = os.getcwd()
@@ -30,49 +30,43 @@ def main(model_name, dataset_path, num_samples=1 ):
     os.chmod(tmp_dir, 0o777)  # Adjust permissions as needed
     os.environ["RAY_TMPDIR"] = tmp_dir
 
-    # parameters
-    # max_num_epochs = 50
-    grace_period = 2
     is_searching = True if num_samples > 1 else False
 
     search_space = {
         "model_name": model_name,
         "dataset_path": os.path.join(work_dir, dataset_path),
-        # "num_epochs": max_num_epochs,
         "seed_value": 42,
+        "freq":30000,
+        "debug":True,
 
 
         # search space       
+        "Rs": tune.uniform(0.1,1000),
+        "N": tune.randint(1,7),
+        **{f"R_{i}": tune.uniform(0.5, 5.0) for i in range(6)},
+        **{f"C_{i}": tune.loguniform(0.01, 10.0) for i in range(6)},
+        **{f"alpha_{i}": tune.uniform(0.1, 1.0) for i in range(6)},
 
     }
 
-    hyperopt_search = HyperOptSearch(metric="val_acc", mode="max")
+    hyperopt_search = HyperOptSearch(metric="bic", mode="min")
 
     # ASHA scheduler
     asha_scheduler = ASHAScheduler(
-        metric="val_loss",
+        metric="bic",
         mode="min",
-        max_t=max_num_epochs,   # Maximum number of training iterations
-        grace_period=grace_period,         # Number of iterations before considering early stopping
+        max_t=1,   # Maximum number of training iterations
+        grace_period=1,         # Number of iterations before considering early stopping
         reduction_factor=3,      # keeps the top 1/reduction_factor running, the rest is pruned
         brackets=2              # more brackets = more exploration in the parameters
     )
     
-
-    # Early stopper
-    stopper = TrialPlateauStopper(
-        metric="val_loss",
-        num_results=5,
-        grace_period=grace_period,
-        mode="min"
-    )
     
     # running config
     run_config = RunConfig(
         name=model_name,
         storage_path=storage_path,
         failure_config=config.FailureConfig(max_failures=0),
-        stop=stopper,
     )
 
     # Restore or run a new tuning
@@ -91,8 +85,8 @@ def main(model_name, dataset_path, num_samples=1 ):
     if is_searching:
         tuner = tune.Tuner(
             trainable=tune.with_resources(
-                tune.with_parameters(train_model),
-                resources={"cpu": 4}
+                tune.with_parameters(run_model.run_model),
+                resources={"cpu": 4,"gpu": gpus_per_trial}
             ),
             tune_config=tune.TuneConfig(
                 search_alg=hyperopt_search,  
@@ -110,10 +104,10 @@ def main(model_name, dataset_path, num_samples=1 ):
 
     else:
         ray.init(runtime_env={"env_vars": {"USE_LIBUV": "0"}}, configure_logging=False)
-        scaling_config = ScalingConfig(num_workers=1, use_gpu=False, resources_per_worker={"CPU": 8})
+        scaling_config = ScalingConfig(num_workers=1, use_gpu=True, resources_per_worker={"CPU": 4,"gpu": gpus_per_trial})
 
         trainer = TorchTrainer(
-            train_loop_per_worker=train_model,
+            train_loop_per_worker=run_model.run_model,
             train_loop_config=search_space,
             scaling_config=scaling_config,
             run_config=run_config

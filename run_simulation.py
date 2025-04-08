@@ -1,7 +1,7 @@
 import jax
 import vb_eis.state_space_sim as state_space_sim
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
 
 from tqdm import trange, tqdm
