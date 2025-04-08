@@ -37,10 +37,10 @@ def main():
     fbs = np.array([30000])
 
     # Electrical circuit blocks
-    Rs = jnp.array(300.)                      # Resistance of supply?
-    R = jnp.array([1., 20.])             # Resistance
-    C = jnp.array([.1, 10.])            # Capacitance
-    alpha = jnp.array([0.88, 0.52])    # Fractional factor linked with the capacitance
+    Rs = jnp.array(1.5)                  # Resistance of supply?
+    R = jnp.array([1., 2.])             # Resistance
+    C = jnp.array([.1, 3.])            # Capacitance
+    alpha = jnp.array([0.88, 0.92])    # Fractional factor linked with the capacitance
 
     params = {
         "fbs": fbs,
@@ -53,7 +53,7 @@ def main():
     }
 
     # run simulation
-    y_pred = run_simulation.main(I,params)
+    y_pred = run_simulation.main(I,params,apply_noise=True)
 
     # compute metrics
     n = len(y_true)   
