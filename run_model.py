@@ -1,8 +1,10 @@
+import os
 import numpy as np
 from sklearn.linear_model import LinearRegression
 import jax.numpy as jnp
 import h5py
 from sklearn.metrics import mean_squared_error
+from ray.air import session
 
 import run_simulation
 
@@ -29,15 +31,17 @@ def run_model(config:dict):
     debug = config["debug"]
     freq = config["freq"]
     N = config["N"]
+    data_path = os.path.join(config["path"], f"data_prbs_{freq}hz_1000000_20190207_013502.mat")
+
 
     # Load real data
-    data = load_matlab_data(f"data/data_prbs_{freq}hz_1000000_20190207_013502.mat")
+    data = load_matlab_data(data_path)
     I = jnp.array(data.get("I"))[0]
     y_true = data.get("U4")
 
 
     if debug:
-        sample_size = 1000
+        sample_size = 10000
         I = I[0:sample_size]
         y_true = y_true[:,0:sample_size]
 
@@ -58,6 +62,8 @@ def run_model(config:dict):
     n = len(y_true)   
     mse = mean_squared_error(y_true, y_pred)
     bic = compute_bic(n,mse, N) # maybe N*3+1 to count the real number of parameters?
+
+    session.report(metrics={"bic":bic,"mse":mse})
 
     return bic
 

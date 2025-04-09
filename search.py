@@ -4,7 +4,7 @@ import pandas as pd
 from ray import tune
 import ray
 from ray.train import Checkpoint, RunConfig
-from ray.train.torch import TorchTrainer
+# from ray.train.torch import TorchTrainer
 from ray.tune.stopper import TrialPlateauStopper
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.hyperopt import HyperOptSearch
@@ -18,7 +18,7 @@ def custom_trial_dirname_creator(trial):
 
 
 
-def main(model_name, dataset_path, num_samples=1, gpus_per_trial=float(1/4) ):
+def main(model_name, num_samples=1, gpus_per_trial=float(1/4) ):
 
     # create dirs and stuff
     work_dir = os.getcwd()
@@ -34,7 +34,7 @@ def main(model_name, dataset_path, num_samples=1, gpus_per_trial=float(1/4) ):
 
     search_space = {
         "model_name": model_name,
-        "dataset_path": os.path.join(work_dir, dataset_path),
+        "path": os.path.join(work_dir, "data"),
         "seed_value": 42,
         "freq":30000,
         "debug":True,
@@ -56,7 +56,7 @@ def main(model_name, dataset_path, num_samples=1, gpus_per_trial=float(1/4) ):
         metric="bic",
         mode="min",
         max_t=1,   # Maximum number of training iterations
-        grace_period=1,         # Number of iterations before considering early stopping
+        # grace_period=1,         # Number of iterations before considering early stopping
         reduction_factor=3,      # keeps the top 1/reduction_factor running, the rest is pruned
         brackets=2              # more brackets = more exploration in the parameters
     )
@@ -99,62 +99,61 @@ def main(model_name, dataset_path, num_samples=1, gpus_per_trial=float(1/4) ):
         )
         
         results = tuner.fit()
-        best_result = results.get_best_result("val_acc", "max","all")
+        best_result = results.get_best_result("bic", "min","last")
         # best_checkpoint = best_result.checkpoint
 
     else:
         ray.init(runtime_env={"env_vars": {"USE_LIBUV": "0"}}, configure_logging=False)
         scaling_config = ScalingConfig(num_workers=1, use_gpu=True, resources_per_worker={"CPU": 4,"gpu": gpus_per_trial})
 
-        trainer = TorchTrainer(
-            train_loop_per_worker=run_model.run_model,
-            train_loop_config=search_space,
-            scaling_config=scaling_config,
-            run_config=run_config
-        )
+        # trainer = TorchTrainer(
+        #     train_loop_per_worker=run_model.run_model,
+        #     train_loop_config=search_space,
+        #     scaling_config=scaling_config,
+        #     run_config=run_config
+        # )
 
-        best_result = trainer.fit()
+        # best_result = trainer.fit()
         # best_checkpoint = best_result.get_best_checkpoint("val_loss", "min")
 
-    best_checkpoint = best_result.checkpoint
-    best_model_path = best_checkpoint.path
+    # best_checkpoint = best_result.checkpoint
+    # best_model_path = best_checkpoint.path
 
 
-    print(f"Best trial config: {best_result.config}")
-    print(f"Best trial validation accuracy: {best_result.metrics['val_acc']}")
-    print(f"Best trial final validation loss: {best_result.metrics['val_loss']}")
-    print(f"path is {best_model_path}")
+    print(f"Best config: {best_result.config}")
+    print(f"Best BIC : {best_result.metrics['bic']}")
+    # print(f"path is {best_model_path}")
+    print(best_result)
 
     # save best model
-    dir_path = os.path.join(work_dir,"saved_models",model_name)
-    os.makedirs(dir_path, exist_ok=True)
-    try:
-        best_checkpoint.to_directory(dir_path)
+    # dir_path = os.path.join(work_dir,"saved_models",model_name)
+    # os.makedirs(dir_path, exist_ok=True)
+    # try:
+    #     best_checkpoint.to_directory(dir_path)
 
-        # get config
-        with open(f"{dir_path}/config.json", "w") as outfile: 
-            json.dump(best_result.config, outfile)
+    #     # get config
+    #     with open(f"{dir_path}/config.json", "w") as outfile: 
+    #         json.dump(best_result.config, outfile)
         
-        # get metrics
-        progress_path = os.path.join("/".join(best_model_path.split("/")[:-1]),"progress.csv")
-        df = pd.read_csv(progress_path)
+    #     # get metrics
+    #     progress_path = os.path.join("/".join(best_model_path.split("/")[:-1]),"progress.csv")
+    #     df = pd.read_csv(progress_path)
 
-        df.dropna(how='all', inplace=True)
-        useful_columns = ['loss', 'acc', 'val_loss', 'val_acc', 'training_iteration']
+    #     df.dropna(how='all', inplace=True)
+    #     useful_columns = ['loss', 'acc', 'val_loss', 'val_acc', 'training_iteration']
 
-        df_cleaned = df[useful_columns]
-        df_cleaned.to_csv(f"{dir_path}/progress.csv", index=False)
+    #     df_cleaned = df[useful_columns]
+    #     df_cleaned.to_csv(f"{dir_path}/progress.csv", index=False)
         
 
-    except Exception as e:
-        print(f"Couldn't save the model because of {e}")
+    # except Exception as e:
+    #     print(f"Couldn't save the model because of {e}")
 
 
 
 
 
 if __name__=="__main__":
-    model_name = "mnist_modular_search"
-    dataset_path = "datasets/mnist/train.csv"
+    model_name = "bic_experiment"
 
-    main(model_name,dataset_path, 100)
+    main(model_name, 20,0)  
