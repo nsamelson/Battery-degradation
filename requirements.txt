@@ -1,0 +1,8 @@
+jax
+pandas
+scikit-learn
+nltk
+dm-haiku
+flax
+ray
+matplotlib
