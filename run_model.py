@@ -61,7 +61,7 @@ def run_model(config:dict):
     # compute metrics
     n = len(y_true)   
     mse = mean_squared_error(y_true, y_pred)
-    bic = compute_bic(n,mse, N) # maybe N*3+1 to count the real number of parameters?
+    bic = compute_bic(n,mse, N*3+1) # maybe N*3+1 to count the real number of parameters?
 
     session.report(metrics={"bic":bic,"mse":mse})
 

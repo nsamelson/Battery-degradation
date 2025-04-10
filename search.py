@@ -46,8 +46,8 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4) ):
         "Rs": tune.uniform(0.1,1000),
         "N": tune.randint(1,7),
         **{f"R_{i}": tune.uniform(0.5, 5.0) for i in range(6)},
-        **{f"C_{i}": tune.loguniform(0.01, 10.0) for i in range(6)},
-        **{f"alpha_{i}": tune.uniform(0.1, 1.0) for i in range(6)},
+        **{f"C_{i}": tune.loguniform(0.05, 10.0) for i in range(6)},
+        **{f"alpha_{i}": tune.uniform(0.5, 1.0) for i in range(6)},
 
     }
 
@@ -104,9 +104,6 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4) ):
         best_result = results.get_best_result("bic", "min","last")
 
 
-    # best_checkpoint = best_result.checkpoint
-    # best_model_path = best_checkpoint.path
-
 
     print(f"Best config: {best_result.config}")
     print(f"Best BIC : {best_result.metrics['bic']}")
@@ -114,28 +111,18 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4) ):
     print(best_result)
 
     # save best model
-    # dir_path = os.path.join(work_dir,"saved_models",model_name)
-    # os.makedirs(dir_path, exist_ok=True)
-    # try:
-    #     best_checkpoint.to_directory(dir_path)
-
-    #     # get config
-    #     with open(f"{dir_path}/config.json", "w") as outfile: 
-    #         json.dump(best_result.config, outfile)
-        
-    #     # get metrics
-    #     progress_path = os.path.join("/".join(best_model_path.split("/")[:-1]),"progress.csv")
-    #     df = pd.read_csv(progress_path)
-
-    #     df.dropna(how='all', inplace=True)
-    #     useful_columns = ['loss', 'acc', 'val_loss', 'val_acc', 'training_iteration']
-
-    #     df_cleaned = df[useful_columns]
-    #     df_cleaned.to_csv(f"{dir_path}/progress.csv", index=False)
+    dir_path = os.path.join(work_dir,"output",model_name)
+    os.makedirs(dir_path, exist_ok=True)
+    try:
+        # get config
+        with open(f"{dir_path}/best_config.json", "w") as outfile: 
+            json.dump(best_result.config, outfile)
+        with open(f"{dir_path}/best_metrics.json", "w") as outfile: 
+            json.dump(best_result.metrics, outfile)
         
 
-    # except Exception as e:
-    #     print(f"Couldn't save the model because of {e}")
+    except Exception as e:
+        print(f"Couldn't save the model because of {e}")
 
 
 
