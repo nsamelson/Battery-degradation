@@ -23,7 +23,9 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4) ):
     # create dirs and stuff
     work_dir = os.getcwd()
     storage_path = os.path.join(work_dir,"ray_results")
-    tmp_dir = os.path.join(work_dir,"tmp")
+    # tmp_dir = os.path.join(work_dir,"tmp")
+    tmp_dir = "/tmp/ray_tmp"  # much shorter path
+
     # trials_dir = os.path.join(storage_path, model_name)
     
     os.makedirs(tmp_dir, exist_ok=True)
@@ -100,21 +102,7 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4) ):
         
         results = tuner.fit()
         best_result = results.get_best_result("bic", "min","last")
-        # best_checkpoint = best_result.checkpoint
 
-    else:
-        ray.init(runtime_env={"env_vars": {"USE_LIBUV": "0"}}, configure_logging=False)
-        scaling_config = ScalingConfig(num_workers=1, use_gpu=True, resources_per_worker={"CPU": 4,"gpu": gpus_per_trial})
-
-        # trainer = TorchTrainer(
-        #     train_loop_per_worker=run_model.run_model,
-        #     train_loop_config=search_space,
-        #     scaling_config=scaling_config,
-        #     run_config=run_config
-        # )
-
-        # best_result = trainer.fit()
-        # best_checkpoint = best_result.get_best_checkpoint("val_loss", "min")
 
     # best_checkpoint = best_result.checkpoint
     # best_model_path = best_checkpoint.path

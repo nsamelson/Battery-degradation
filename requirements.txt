@@ -4,7 +4,7 @@ scikit-learn
 nltk
 dm-haiku
 flax
-"ray[tune]"
+ray[tune]
 matplotlib
 h5py
 hyperopt
