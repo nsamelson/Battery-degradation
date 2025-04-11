@@ -6,6 +6,7 @@ import h5py
 from sklearn.metrics import mean_squared_error
 from ray.air import session
 
+
 import run_simulation
 
     # Simulation frequency parameters
@@ -57,6 +58,11 @@ def run_model(config:dict):
 
     # run simulation
     y_pred = run_simulation.main(I,params,apply_noise=True)
+
+    if np.isnan(y_pred).any():
+        bic = float("inf")
+        session.report(metrics={"bic":bic,"mse":float("inf")}) # Penalize the trial heavily
+        return bic
 
     # compute metrics
     n = len(y_true)   

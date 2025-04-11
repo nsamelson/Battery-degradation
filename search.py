@@ -1,14 +1,15 @@
+import argparse
 import os
 import json
-import pandas as pd
+# import pandas as pd
 from ray import tune
 import ray
-from ray.train import Checkpoint, RunConfig
+from ray.tune import RunConfig, FailureConfig
 # from ray.train.torch import TorchTrainer
 from ray.tune.stopper import TrialPlateauStopper
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.hyperopt import HyperOptSearch
-from ray.air import session, config, ScalingConfig
+import multiprocessing
 
 import run_model
 
@@ -18,7 +19,7 @@ def custom_trial_dirname_creator(trial):
 
 
 
-def main(model_name, num_samples=1, gpus_per_trial=float(1/4) ):
+def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=False ):
 
     # create dirs and stuff
     work_dir = os.getcwd()
@@ -38,8 +39,8 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4) ):
         "model_name": model_name,
         "path": os.path.join(work_dir, "data"),
         "seed_value": 42,
-        "freq":30000,
-        "debug":True,
+        "freq":freq,
+        "debug":debug,
 
 
         # search space       
@@ -68,7 +69,7 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4) ):
     run_config = RunConfig(
         name=model_name,
         storage_path=storage_path,
-        failure_config=config.FailureConfig(max_failures=0),
+        failure_config=FailureConfig(max_failures=0),
     )
 
     # Restore or run a new tuning
@@ -127,8 +128,40 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4) ):
 
 
 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-n","--name",help="Name of the experiment",default="default")
+    parser.add_argument("-s","--samples",help="Number of samples",default=100)
+    parser.add_argument("-f","--frequency",choices=[10,100,1000,10000,30000],help="Chose the frequency",default=30000)
+    parser.add_argument("-d", "--debug", action="store_true", help="debug")
+    parser.add_argument("-g", "--gpus", help="Number of GPUs, default is 1",default=0.25)
 
-if __name__=="__main__":
-    model_name = "bic_experiment"
+    args = parser.parse_args()
 
-    main(model_name, 20,0)  
+    # grab cpu and gpu from available info
+    num_cpus = int(os.environ.get("SLURM_CPUS_ON_NODE", "8"))
+    num_gpus = len(os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")) if "CUDA_VISIBLE_DEVICES" in os.environ else 0
+
+
+    # Set multiprocessing start method first (critical)
+    multiprocessing.set_start_method("spawn", force=True)
+    # model_name = "param_search"
+
+    # # Then initialize Ray 
+    ray.init(
+        num_cpus=num_cpus,
+        num_gpus=num_gpus,
+        runtime_env={"env_vars": {
+            "JAX_PLATFORM_NAME": "gpu",
+            "XLA_FLAGS": "--xla_cpu_multi_thread_eigen=false",  # Optional: disables JAX CPU threading
+            "OMP_NUM_THREADS": "1",  # For numpy/BLAS/OpenMP conflicts
+            "MKL_NUM_THREADS": "1"
+        }},
+        # _plasma_directory="/tmp",  # Optional, good for tmpdir management
+        ignore_reinit_error=True,
+    )
+
+    model_name = f"{args.name}_{args.frequency}_hz"
+
+    # Launch your hyperparameter search
+    main(model_name, num_samples=args.samples, gpus_per_trial=args.gpus, freq=args.frequency, debug=args.debug)
