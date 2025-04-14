@@ -132,7 +132,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-n","--name",help="Name of the experiment",default="default")
     parser.add_argument("-s","--samples",help="Number of samples",default=100)
-    parser.add_argument("-f","--frequency",choices=[10,100,1000,10000,30000],help="Chose the frequency",default=30000)
+    parser.add_argument("-f","--frequency",choices=["10","100","1000","10000","30000"],help="Chose the frequency",default="30000")
     parser.add_argument("-d", "--debug", action="store_true", help="debug")
     parser.add_argument("-g", "--gpus", help="Number of GPUs, default is 1",default=0.25)
 
@@ -164,4 +164,4 @@ if __name__ == "__main__":
     model_name = f"{args.name}_{args.frequency}_hz"
 
     # Launch your hyperparameter search
-    main(model_name, num_samples=args.samples, gpus_per_trial=args.gpus, freq=args.frequency, debug=args.debug)
+    main(model_name, num_samples=int(args.samples), gpus_per_trial=int(args.gpus), freq=int(args.frequency), debug=args.debug)
