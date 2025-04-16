@@ -27,7 +27,7 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=F
     # tmp_dir = os.path.join(work_dir,"tmp")
     tmp_dir = "/tmp/ray_tmp"  # much shorter path
 
-    # trials_dir = os.path.join(storage_path, model_name)
+    trials_dir = os.path.join(storage_path, model_name)
     
     os.makedirs(tmp_dir, exist_ok=True)
     os.chmod(tmp_dir, 0o777)  # Adjust permissions as needed
@@ -77,8 +77,8 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=F
     #     tuner = tune.Tuner.restore(
     #         trials_dir, 
     #         trainable=tune.with_resources(
-    #             tune.with_parameters(train_model),
-    #             resources={"cpu": 8}
+    #             tune.with_parameters(run_model.run_model),
+    #             resources={"cpu": 4}
     #         ), 
     #         resume_errored=True,
     #         param_space= search_space
@@ -148,20 +148,20 @@ if __name__ == "__main__":
     # model_name = "param_search"
 
     # # Then initialize Ray 
-    ray.init(
-        num_cpus=num_cpus,
-        num_gpus=num_gpus,
-        runtime_env={"env_vars": {
-            "JAX_PLATFORM_NAME": "gpu",
-            "XLA_FLAGS": "--xla_cpu_multi_thread_eigen=false",  # Optional: disables JAX CPU threading
-            "OMP_NUM_THREADS": "1",  # For numpy/BLAS/OpenMP conflicts
-            "MKL_NUM_THREADS": "1"
-        }},
-        # _plasma_directory="/tmp",  # Optional, good for tmpdir management
-        ignore_reinit_error=True,
-    )
+    # ray.init(
+    #     num_cpus=num_cpus,
+    #     num_gpus=num_gpus,
+    #     runtime_env={"env_vars": {
+    #         "JAX_PLATFORM_NAME": "gpu",
+    #         "XLA_FLAGS": "--xla_cpu_multi_thread_eigen=false",  # Optional: disables JAX CPU threading
+    #         "OMP_NUM_THREADS": "1",  # For numpy/BLAS/OpenMP conflicts
+    #         "MKL_NUM_THREADS": "1"
+    #     }},
+    #     # _plasma_directory="/tmp",  # Optional, good for tmpdir management
+    #     ignore_reinit_error=True,
+    # )
 
     model_name = f"{args.name}_{args.frequency}_hz"
 
     # Launch your hyperparameter search
-    main(model_name, num_samples=int(args.samples), gpus_per_trial=int(args.gpus), freq=int(args.frequency), debug=args.debug)
+    main(model_name, num_samples=int(args.samples), gpus_per_trial=float(args.gpus), freq=int(args.frequency), debug=args.debug)
