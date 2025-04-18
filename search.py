@@ -19,7 +19,7 @@ def custom_trial_dirname_creator(trial):
 
 
 
-def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=False ):
+def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=False, cpus=16 ):
 
     # create dirs and stuff
     work_dir = os.getcwd()
@@ -33,7 +33,7 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=F
     os.chmod(tmp_dir, 0o777)  # Adjust permissions as needed
     os.environ["RAY_TMPDIR"] = tmp_dir
 
-    is_searching = True if num_samples > 1 else False
+    # is_searching = True if num_samples > 1 else False
 
     search_space = {
         "model_name": model_name,
@@ -73,23 +73,22 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=F
     )
 
     # Restore or run a new tuning
-    # if tune.Tuner.can_restore(trials_dir):
-    #     tuner = tune.Tuner.restore(
-    #         trials_dir, 
-    #         trainable=tune.with_resources(
-    #             tune.with_parameters(run_model.run_model),
-    #             resources={"cpu": 4}
-    #         ), 
-    #         resume_errored=True,
-    #         param_space= search_space
-    #     )
-    # else:
+    if tune.Tuner.can_restore(trials_dir):
+        tuner = tune.Tuner.restore(
+            trials_dir, 
+            trainable=tune.with_resources(
+                tune.with_parameters(run_model.run_model),
+                resources={"cpu": cpus,"gpu": gpus_per_trial}
+            ), 
+            resume_errored=True,
+            param_space= search_space
+        )
+    else:
 
-    if is_searching:
         tuner = tune.Tuner(
             trainable=tune.with_resources(
                 tune.with_parameters(run_model.run_model),
-                resources={"cpu": 4,"gpu": gpus_per_trial}
+                resources={"cpu": cpus,"gpu": gpus_per_trial}
             ),
             tune_config=tune.TuneConfig(
                 search_alg=hyperopt_search,  
@@ -101,8 +100,8 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=F
             run_config=run_config
         )
         
-        results = tuner.fit()
-        best_result = results.get_best_result("bic", "min","last")
+    results = tuner.fit()
+    best_result = results.get_best_result("bic", "min","last")
 
 
 
@@ -135,6 +134,7 @@ if __name__ == "__main__":
     parser.add_argument("-f","--frequency",choices=["10","100","1000","10000","30000"],help="Chose the frequency",default="30000")
     parser.add_argument("-d", "--debug", action="store_true", help="debug")
     parser.add_argument("-g", "--gpus", help="Number of GPUs, default is 1",default=0.25)
+    parser.add_argument("-c", "--cpus", help="Number of CPUs, default is 16",default=16)
 
     args = parser.parse_args()
 
@@ -164,4 +164,4 @@ if __name__ == "__main__":
     model_name = f"{args.name}_{args.frequency}_hz"
 
     # Launch your hyperparameter search
-    main(model_name, num_samples=int(args.samples), gpus_per_trial=float(args.gpus), freq=int(args.frequency), debug=args.debug)
+    main(model_name, num_samples=int(args.samples), gpus_per_trial=float(args.gpus), freq=int(args.frequency), debug=args.debug, cpus=int(args.cpus))
