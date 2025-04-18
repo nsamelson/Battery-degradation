@@ -35,78 +35,70 @@ def plot_signals(x, y_true, y_pred, params):
 
 
 def extract_experiments(exp_name):
-    folder = os.path.join("ray_results",exp_name)
-    trial_paths = [os.path.join(folder,trial) for trial in os.listdir(folder) if os.path.isdir(os.path.join(folder,trial))]
+    folder = os.path.join("ray_results", exp_name)
+    trial_paths = [
+        os.path.join(folder, trial)
+        for trial in os.listdir(folder)
+        if os.path.isdir(os.path.join(folder, trial))
+    ]
 
-    all_trials = []
-
+    records = []
     for trial_path in trial_paths:
-        files_list = os.listdir(trial_path)
-        if "result.json" in files_list:
-            with open(os.path.join(trial_path,"result.json"),'r') as f:
+        result_path = os.path.join(trial_path, "result.json")
+        if os.path.exists(result_path):
+            with open(result_path, "r") as f:
                 result = json.load(f)
 
-                all_trials.append({
-                    "bic": result["bic"],
-                    "mse": result["mse"],
-                    "config": result["config"]
-                })
-    
-    out_folder = os.path.join("output",exp_name)
-    os.makedirs(out_folder,exist_ok=True)
+            flat_record = {
+                "bic": result["bic"],
+                "mse": result["mse"]
+            }
+            # Flatten config
+            for k, v in result.get("config", {}).items():
+                flat_record[k] = v
 
-    result_file = os.path.join(out_folder,"results.json")
-    with open(result_file,"w+") as f:
-        json.dump(all_trials, f)
+            records.append(flat_record)
+
+    df = pd.DataFrame(records)
+
+    out_folder = os.path.join("output", exp_name)
+    os.makedirs(out_folder, exist_ok=True)
+    df.to_csv(os.path.join(out_folder, "results.csv"), index=False)
 
         
-def load_and_plot_results(folder_name):
-    # 1. Load data
-    filepath = os.path.join("output",folder_name, "results.json")
-    with open(filepath, "r") as f:
-        data = json.load(f)
-    
-    # 2. Extract bic, mse, config["N"]
-    records = []
-    for entry in data:
-        bic = entry.get("bic")
-        mse = entry.get("mse")
-        config = entry.get("config", {})
-        N = config.get("N")
-        records.append({"bic": bic, "mse": mse, "N": N})
-    
-    df = pd.DataFrame(records)
-    
-    # 3. Plot boxplots
-    fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+def plot_boxplots(exp_name):
+    # Load data
+    df_path = os.path.join("output", exp_name, "results.csv")
+    df = pd.read_csv(df_path)
+
+    fig, axs = plt.subplots(1, 2, figsize=(14, 6))
     fig.suptitle("BIC and MSE over N number of parameters", fontsize=16)
 
+    # BIC plot
     sns.boxplot(data=df, x="N", y="bic", ax=axs[0])
     axs[0].set_title("BIC over N")
     axs[0].set_xlabel("N")
     axs[0].set_ylabel("BIC")
     axs[0].grid(True, which='both', linestyle='--', linewidth=0.5, color='lightgray')
-
-    # Highlight min BIC
     min_bic_row = df.loc[df["bic"].idxmin()]
     axs[0].plot(min_bic_row["N"], min_bic_row["bic"], marker='x', color='black', markersize=8, label='Min BIC')
+    axs[0].legend()
 
+    # MSE plot
     sns.boxplot(data=df, x="N", y="mse", ax=axs[1])
     axs[1].set_yscale("log")
-    axs[1].set_title("MSE over N (log scale)")
+    axs[1].set_title("MSE over N")
     axs[1].set_xlabel("N")
-    axs[1].set_ylabel("MSE (log scale)")
+    axs[1].set_ylabel("MSE")
     axs[1].grid(True, which='both', linestyle='--', linewidth=0.5, color='lightgray')
-
-    # Highlight min MSE
     min_mse_row = df.loc[df["mse"].idxmin()]
     axs[1].plot(min_mse_row["N"], min_mse_row["mse"], marker='x', color='black', markersize=8, label='Min MSE')
-
-    axs[0].legend()
     axs[1].legend()
 
-    plt.tight_layout()
-    plt.savefig(os.path.join("output",folder_name,"bic_and_mse.png"))
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    out_path = os.path.join("output", exp_name, "bic_and_mse.png")
+    plt.savefig(out_path)
+    plt.close()
 
 
 
@@ -127,6 +119,6 @@ if __name__ == "__main__":
     # plot_signals(x, y_true, y_pred, params)
 
     # extract_experiments("bic_30000_hz")
-    load_and_plot_results("bic_30000_hz")
+    plot_boxplots("bic_30000_hz")
 
 
