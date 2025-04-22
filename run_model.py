@@ -1,5 +1,8 @@
+import argparse
 import glob
+import math
 import os
+import random
 import numpy as np
 from sklearn.linear_model import LinearRegression
 import jax.numpy as jnp
@@ -40,23 +43,48 @@ def compute_bic(n, mse, num_params):
     return bic
 
 
-def run_model(config:dict):
+def reduce_sampling(I, y, original_fss, target_fss, duration_s):
+    """
+    Downsamples and trims the signal to a shorter duration.
+
+    Args:
+        I (np.ndarray or jax array): input signal (1D or 2D shape [1, N])
+        y (np.ndarray or jax array): output signal (same shape as I)
+        original_fss (float): original sampling frequency
+        target_fss (float): desired sampling frequency
+        duration_s (float): desired duration in seconds
+
+    Returns:
+        (I_down, y_down): downsampled and truncated input/output
+    """
+    import jax.numpy as jnp
+
+    downsample_ratio = int(original_fss[0] // target_fss)
+    total_samples = int(duration_s * original_fss[0])
+    new_length = int(duration_s * target_fss)
+
+    I_trimmed = I[:total_samples]
+    y_trimmed = y[0, :total_samples]
+
+    I_down = I_trimmed[::downsample_ratio]
+    y_down = y_trimmed[::downsample_ratio]
+
+    # Reshape to keep it consistent with original shape
+    return I_down, jnp.reshape(y_down, (1, -1))
+
+
+
+def run_model(config:dict, is_searching=True, verbose=False):
     debug = config["debug"]
     freq = config["freq"]
     N = config["N"]
     
-
-
     # Load real data
     data = load_matlab_data(config["path"], freq)
     I = jnp.array(data.get("I"))[0]
     y_true = data.get("U4")
 
 
-    if debug:
-        sample_size = 10000
-        I = I[0:sample_size]
-        y_true = y_true[:,0:sample_size]
 
     params = {
         "fbs": np.array([freq]),                                        # bandwidth freq
@@ -67,6 +95,27 @@ def run_model(config:dict):
         "C": jnp.array([config[f"C_{i}"] for i in range(N)]),           # Capacitance
         "alpha": jnp.array([config[f"alpha_{i}"] for i in range(N)])    # Fractional factor
     }
+
+
+    if config.get("reduce_sampling",False):
+        original_fss = data["fs"][0]  # 500000
+        target_fss = config.get("target_fss", 25000)
+        duration = config.get("sim_duration", 20.0)  # seconds
+        I, y_true = reduce_sampling(I, y_true, original_fss, target_fss, duration)
+        # Update fss and durations in params to reflect downsampling
+        params["fss"] = np.array([target_fss])
+        params["durations"] = np.array([duration])
+
+
+    if verbose:
+        print(params)
+        print(I.shape, y_true.shape)
+
+    if debug:
+        sample_size = 10000
+        I = I[0:sample_size]
+        y_true = y_true[:,0:sample_size]
+
 
     # run simulation
     y_pred = run_simulation.main(I,params,apply_noise=True)
@@ -81,60 +130,51 @@ def run_model(config:dict):
     mse = mean_squared_error(y_true, y_pred)
     bic = compute_bic(n,mse, N*3+1) # maybe N*3+1 to count the real number of parameters?
 
-    session.report(metrics={"bic":bic,"mse":mse})
+    if is_searching:
+        session.report(metrics={"bic":bic,"mse":mse})
 
     return bic
 
 
-def main(freq=30000, debug=False):
+def main(model_name, freq=30000, debug=False):
+    work_dir = os.getcwd()
 
-    # Load real data
-    data = load_matlab_data(f"data/data_prbs_{freq}hz_1000000_20190207_013502.mat")
-    I = jnp.array(data.get("I"))[0]
-    y_true = data.get("U4")
-    durations = data.get("duration")[0]
-    fss = data.get("fs")[0]
+    config = {
+        "model_name": model_name,
+        "path": os.path.join(work_dir, "data"),
+        "seed_value": 42,
+        "freq":freq,
+        "debug":debug,
+        "reduce_sampling": True,
+        "target_fss":25000,
+        "sim_duration": 20.0,
 
-    if debug:
-        sample_size = 1000
-        I = I[0:sample_size]
-        y_true = y_true[:,0:sample_size]
 
-    # bandwidth freq
-    fbs = np.array([freq])
-
-    # Electrical circuit blocks
-    Rs = jnp.array(1.5)                  # Resistance of supply?
-    R = jnp.array([1., 2.])             # Resistance
-    C = jnp.array([.1, 3.])            # Capacitance
-    alpha = jnp.array([0.88, 0.92])    # Fractional factor linked with the capacitance
-
-    params = {
-        "fbs": fbs,
-        "durations": durations,
-        "fss": fss,
-        "Rs": Rs,
-        "R": R,
-        "C": C,
-        "alpha": alpha
+        # search space       
+        "Rs": 0.2,
+        "N": 3,
+        **{f"R_{i}": random.uniform(0.5, 5.0) for i in range(3)},
+        **{f"C_{i}": random.uniform(0.05, 1.0) for i in range(3)},
+        **{f"alpha_{i}": random.uniform(0.5, 1.0) for i in range(3)},
     }
 
-    # run simulation
-    y_pred = run_simulation.main(I,params,apply_noise=True)
-
-    # compute metrics
-    n = len(y_true)   
-    mse = mean_squared_error(y_true, y_pred)
-    num_params = 1 + len(R) + len(C) + len(alpha)
-    bic = compute_bic(n,mse,num_params)
-
-    # print(bic, mse, num_params)
-
-    # # Save file
-    # np.savez("output/signals.npz",x=I, y_true=y_true, y_pred=y_pred, params= params, allow_pickle=True)
+    bic = run_model(config, False, False)
+    print(bic)
     
-    return bic
 
 
 if __name__ == "__main__":
-    bic = main(debug=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-n","--name",help="Name of the experiment",default="default")
+    parser.add_argument("-f","--frequency",choices=["10","100","1000","10000","30000"],help="Chose the frequency",default="10")
+    parser.add_argument("-d", "--debug", action="store_true", help="debug")
+
+    args = parser.parse_args()
+
+    random.seed(42)
+    
+
+    model_name = f"{args.name}_{args.frequency}_hz"
+
+    main(model_name, freq=int(args.frequency), debug=args.debug)
+    
