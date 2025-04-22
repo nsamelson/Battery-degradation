@@ -78,14 +78,14 @@ def plot_param_to_perf(exp_name, parameter, freq):
     fig.suptitle(f"BIC and MSE over parameter {parameter} at {freq} Hz", fontsize=16)
 
     # Primary axis - BIC
-    sns.scatterplot(data=df, x=parameter, y="bic", ax=ax1, color="black", s=30, alpha=0.4)
+    sns.scatterplot(data=df, x=parameter, y="bic", ax=ax1, color="royalblue", s=30, alpha=0.6)
     ax1.set_ylabel("BIC", color="black")
     ax1.tick_params(axis='y', labelcolor="black")
     ax1.grid(True, which="major", linestyle='--', linewidth=0.5, color='lightgray')
 
     # Secondary axis - MSE (log scale)
     ax2 = ax1.twinx()
-    sns.scatterplot(data=df, x=parameter, y="mse", ax=ax2, color="black", marker="o", s=30, alpha=0.4)
+    sns.scatterplot(data=df, x=parameter, y="mse", ax=ax2, color="royalblue", marker="o", s=30, alpha=0.6)
     ax2.set_ylabel("MSE (log scale)", color="black")
     ax2.set_yscale("log")
     ax2.tick_params(axis='y', labelcolor="black")
@@ -108,8 +108,13 @@ def plot_boxplots(exp_name, freq):
     df_path = os.path.join("output", exp_name, "results.csv")
     df = pd.read_csv(df_path)
 
+    # Compute count per N
+    counts_per_n = df["N"].value_counts().sort_index()
+    count_dict = counts_per_n.to_dict()
+    total_samples = len(df)
+
     fig, axs = plt.subplots(1, 2, figsize=(14, 6))
-    fig.suptitle(f"BIC and MSE over N number of parameters at {freq} Hz", fontsize=16)
+    fig.suptitle(f"BIC and MSE over N number of parameters at {freq} Hz (n={total_samples} samples)", fontsize=16)
 
     # BIC plot
     sns.boxplot(data=df, x="N", y="bic", color="dodgerblue", ax=axs[0])
@@ -122,6 +127,13 @@ def plot_boxplots(exp_name, freq):
     axs[0].plot(min_bic_row["N"], min_bic_row["bic"], marker='x', color='black', markersize=8,
                 label=f'Best BIC: {min_bic_val}')
     axs[0].legend()
+
+    # Annotate counts under each tick
+    for xtick in axs[0].get_xticks():
+        n_value = int(axs[0].get_xticklabels()[xtick].get_text())
+        count = count_dict.get(n_value, 0)
+        axs[0].text(xtick, axs[0].get_ylim()[0] - 0.9, f'n={count}', 
+                    ha='center', va='top', fontsize=9, color='gray')
 
     # MSE plot
     sns.boxplot(data=df, x="N", y="mse", color="dodgerblue", ax=axs[1])
@@ -136,7 +148,14 @@ def plot_boxplots(exp_name, freq):
                 label=f'Best MSE: {min_mse_val}')
     axs[1].legend()
 
-    plt.tight_layout(rect=[0, 0, 1, 1])
+    # Annotate counts under each tick
+    for xtick in axs[1].get_xticks():
+        n_value = int(axs[1].get_xticklabels()[xtick].get_text())
+        count = count_dict.get(n_value, 0)
+        axs[1].text(xtick, axs[1].get_ylim()[0] * 0.4, f'n={count}', 
+                    ha='center', va='top', fontsize=9, color='gray')
+
+    plt.tight_layout(rect=[0, 0.01, 1, 1])
     out_path = os.path.join("output", exp_name, "bic_and_mse.png")
     plt.savefig(out_path)
     plt.close()
@@ -158,7 +177,7 @@ if __name__ == "__main__":
     # # print(x.shape,y_true.shape,y_pred.shape)
 
     # plot_signals(x, y_true, y_pred, params)
-    freq = 30000
+    freq = 1000
     exp_name = f"bic_{freq}_hz"
     parameters = ["Rs","C_0","R_0","alpha_0"]
 
