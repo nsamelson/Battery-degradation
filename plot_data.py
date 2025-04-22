@@ -74,21 +74,21 @@ def plot_param_to_perf(exp_name, parameter, freq):
     if parameter not in df.columns:
         raise ValueError(f"Parameter '{parameter}' not found in results.")
 
-    fig, ax1 = plt.subplots(figsize=(12, 6))
+    fig, ax1 = plt.subplots(figsize=(14, 6))
     fig.suptitle(f"BIC and MSE over parameter {parameter} at {freq} Hz", fontsize=16)
 
     # Primary axis - BIC
-    sns.scatterplot(data=df, x=parameter, y="bic", ax=ax1, color="navy", s=30, alpha=1)
-    ax1.set_ylabel("BIC", color="navy")
-    ax1.tick_params(axis='y', labelcolor="navy")
+    sns.scatterplot(data=df, x=parameter, y="bic", ax=ax1, color="black", s=30, alpha=0.4)
+    ax1.set_ylabel("BIC", color="black")
+    ax1.tick_params(axis='y', labelcolor="black")
     ax1.grid(True, which="major", linestyle='--', linewidth=0.5, color='lightgray')
 
     # Secondary axis - MSE (log scale)
     ax2 = ax1.twinx()
-    sns.scatterplot(data=df, x=parameter, y="mse", ax=ax2, color="darkorange", marker="o", s=30, alpha=0.4)
-    ax2.set_ylabel("MSE (log scale)", color="darkorange")
+    sns.scatterplot(data=df, x=parameter, y="mse", ax=ax2, color="black", marker="o", s=30, alpha=0.4)
+    ax2.set_ylabel("MSE (log scale)", color="black")
     ax2.set_yscale("log")
-    ax2.tick_params(axis='y', labelcolor="darkorange")
+    ax2.tick_params(axis='y', labelcolor="black")
 
     # Enable grid for log scale (right axis)
     ax2.grid(True, which="both", axis="y", linestyle=":", linewidth=0.5, color="lightgray")
@@ -103,7 +103,7 @@ def plot_param_to_perf(exp_name, parameter, freq):
     plt.savefig(out_path)
     plt.close()
         
-def plot_boxplots(exp_name,freq):
+def plot_boxplots(exp_name, freq):
     # Load data
     df_path = os.path.join("output", exp_name, "results.csv")
     df = pd.read_csv(df_path)
@@ -112,13 +112,15 @@ def plot_boxplots(exp_name,freq):
     fig.suptitle(f"BIC and MSE over N number of parameters at {freq} Hz", fontsize=16)
 
     # BIC plot
-    sns.boxplot(data=df, x="N", y="bic", color="dodgerblue", ax=axs[0], )
+    sns.boxplot(data=df, x="N", y="bic", color="dodgerblue", ax=axs[0])
     axs[0].set_title("BIC over N")
     axs[0].set_xlabel("N")
     axs[0].set_ylabel("BIC")
-    # axs[0].grid(True, which='both', linestyle='--', linewidth=0.5, color='lightgray')
+
     min_bic_row = df.loc[df["bic"].idxmin()]
-    axs[0].plot(min_bic_row["N"], min_bic_row["bic"], marker='x', color='black', markersize=8, label='Min BIC')
+    min_bic_val = round(min_bic_row["bic"], 3)
+    axs[0].plot(min_bic_row["N"], min_bic_row["bic"], marker='x', color='black', markersize=8,
+                label=f'Best BIC: {min_bic_val}')
     axs[0].legend()
 
     # MSE plot
@@ -126,13 +128,15 @@ def plot_boxplots(exp_name,freq):
     axs[1].set_yscale("log")
     axs[1].set_title("MSE over N")
     axs[1].set_xlabel("N")
-    axs[1].set_ylabel("MSE")
-    # axs[1].grid(True, which='both', linestyle='--', linewidth=0.5, color='lightgray')
+    axs[1].set_ylabel("MSE (log scale)")
+
     min_mse_row = df.loc[df["mse"].idxmin()]
-    axs[1].plot(min_mse_row["N"], min_mse_row["mse"], marker='x', color='black', markersize=8, label='Min MSE')
+    min_mse_val = round(min_mse_row["mse"], 3)
+    axs[1].plot(min_mse_row["N"], min_mse_row["mse"], marker='x', color='black', markersize=8,
+                label=f'Best MSE: {min_mse_val}')
     axs[1].legend()
 
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.tight_layout(rect=[0, 0, 1, 1])
     out_path = os.path.join("output", exp_name, "bic_and_mse.png")
     plt.savefig(out_path)
     plt.close()
