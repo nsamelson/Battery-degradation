@@ -89,7 +89,7 @@ def main(I, parameters:dict, apply_noise=False):
 
         # add noise
         if apply_noise:
-            y = add_white_noise(y, 0.01, jax.random.fold_in(jax_key, 100))
+            y = add_white_noise(y, 0.05, jax.random.fold_in(jax_key, 100))
 
         responses.append(jnp.asarray(y, copy=True))
 
