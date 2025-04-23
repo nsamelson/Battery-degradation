@@ -47,10 +47,10 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=F
 
 
         # search space       
-        "Rs": tune.loguniform(0.05,1.0),
+        "Rs": tune.loguniform(0.05,5.0),
         "N": tune.randint(1,7),
         **{f"R_{i}": tune.loguniform(0.01, 5.0) for i in range(6)},
-        **{f"C_{i}": tune.loguniform(10.0, 1000.0) for i in range(6)},
+        **{f"C_{i}": tune.uniform(1.0, 100.0) for i in range(6)},
         **{f"alpha_{i}": tune.uniform(0.5, 1.0) for i in range(6)},
 
     }

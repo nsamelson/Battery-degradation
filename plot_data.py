@@ -124,7 +124,7 @@ def plot_boxplots(exp_name, freq):
 
     min_bic_row = df.loc[df["bic"].idxmin()]
     min_bic_val = round(min_bic_row["bic"], 3)
-    axs[0].plot(min_bic_row["N"], min_bic_row["bic"], marker='x', color='black', markersize=8,
+    axs[0].plot(min_bic_row["N"] - 1, min_bic_row["bic"], marker='x', color='black', markersize=8,
                 label=f'Best BIC: {min_bic_val}')
     axs[0].legend()
 
@@ -132,7 +132,7 @@ def plot_boxplots(exp_name, freq):
     for xtick in axs[0].get_xticks():
         n_value = int(axs[0].get_xticklabels()[xtick].get_text())
         count = count_dict.get(n_value, 0)
-        axs[0].text(xtick, axs[0].get_ylim()[0] - 0.9, f'n={count}', 
+        axs[0].text(xtick, axs[0].get_ylim()[0] - 0.1, f'n={count}', 
                     ha='center', va='top', fontsize=9, color='gray')
 
     # MSE plot
@@ -144,7 +144,7 @@ def plot_boxplots(exp_name, freq):
 
     min_mse_row = df.loc[df["mse"].idxmin()]
     min_mse_val = round(min_mse_row["mse"], 3)
-    axs[1].plot(min_mse_row["N"], min_mse_row["mse"], marker='x', color='black', markersize=8,
+    axs[1].plot(min_mse_row["N"] - 1, min_mse_row["mse"], marker='x', color='black', markersize=8,
                 label=f'Best MSE: {min_mse_val}')
     axs[1].legend()
 
@@ -152,10 +152,10 @@ def plot_boxplots(exp_name, freq):
     for xtick in axs[1].get_xticks():
         n_value = int(axs[1].get_xticklabels()[xtick].get_text())
         count = count_dict.get(n_value, 0)
-        axs[1].text(xtick, axs[1].get_ylim()[0] * 0.4, f'n={count}', 
+        axs[1].text(xtick, axs[1].get_ylim()[0] * 0.9, f'n={count}', 
                     ha='center', va='top', fontsize=9, color='gray')
 
-    plt.tight_layout(rect=[0, 0.01, 1, 1])
+    plt.tight_layout(rect=[0, 0, 1, 1])
     out_path = os.path.join("output", exp_name, "bic_and_mse.png")
     plt.savefig(out_path)
     plt.close()
@@ -178,7 +178,7 @@ if __name__ == "__main__":
 
     # plot_signals(x, y_true, y_pred, params)
     freq = 30000
-    exp_name = f"newtest_{freq}_hz"
+    exp_name = f"bic_new_range_{freq}_hz"
     parameters = ["Rs","C_0","R_0","alpha_0"]
 
     extract_experiments(exp_name)
