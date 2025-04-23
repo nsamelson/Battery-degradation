@@ -2,22 +2,20 @@ import argparse
 import glob
 import math
 import os
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 import random
 import numpy as np
 from sklearn.linear_model import LinearRegression
-import jax.numpy as jnp
+# import jax.numpy as jnp
 import h5py
 from sklearn.metrics import mean_squared_error
 from ray.air import session
 
+from ray import tune
 
-import run_simulation
 
-    # Simulation frequency parameters
-    # fbs = np.array([1]) # bandwidths of the DRBS signal
-    # durations = [10]    # duration of the sampling (s)
-    # fss = [2000]         # sampling frequency
-
+import simulation
 
 
 
@@ -61,7 +59,6 @@ def reduce_sampling(I, y, original_fss, target_fss, duration_s):
 
     downsample_ratio = int(original_fss[0] // target_fss)
     total_samples = int(duration_s * original_fss[0])
-    new_length = int(duration_s * target_fss)
 
     I_trimmed = I[:total_samples]
     y_trimmed = y[0, :total_samples]
@@ -75,6 +72,12 @@ def reduce_sampling(I, y, original_fss, target_fss, duration_s):
 
 
 def run_model(config:dict, is_searching=True, verbose=False):
+    import jax
+    import jax.numpy as jnp
+
+    print("JAX devices:", jax.devices())
+
+
     debug = config["debug"]
     freq = config["freq"]
     N = config["N"]
@@ -83,8 +86,6 @@ def run_model(config:dict, is_searching=True, verbose=False):
     data = load_matlab_data(config["path"], freq)
     I = jnp.array(data.get("I"))[0]
     y_true = data.get("U4")
-
-
 
     params = {
         "fbs": np.array([freq]),                                        # bandwidth freq
@@ -112,26 +113,29 @@ def run_model(config:dict, is_searching=True, verbose=False):
         print(I.shape, y_true.shape)
 
     if debug:
-        sample_size = 10000
+        sample_size = 50000
         I = I[0:sample_size]
         y_true = y_true[:,0:sample_size]
 
 
     # run simulation
-    y_pred = run_simulation.main(I,params,apply_noise=True)
+    y_pred = simulation.main(I,params,apply_noise=True)
 
     if np.isnan(y_pred).any():
         bic = float("inf")
-        session.report(metrics={"bic":bic,"mse":float("inf")}) # Penalize the trial heavily
-        return bic
-
-    # compute metrics
-    n = len(y_true)   
-    mse = mean_squared_error(y_true, y_pred)
-    bic = compute_bic(n,mse, N*3+1) # maybe N*3+1 to count the real number of parameters?
+        mse = float("inf")
+    else:       
+        # compute metrics
+        n = len(y_true)   
+        mse = mean_squared_error(y_true, y_pred)
+        bic = compute_bic(n,mse, N*3+1) # N*3+1 to count the real number of parameters
 
     if is_searching:
-        session.report(metrics={"bic":bic,"mse":mse})
+        try:
+            tune.report(metrics={"bic":bic,"mse":mse})
+        finally:
+            import jax
+            jax.clear_backends()
 
     return bic
 

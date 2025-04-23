@@ -1,15 +1,15 @@
 import argparse
 import os
 import json
-# import pandas as pd
-from ray import tune
 import ray
+from ray import tune
 from ray.tune import RunConfig, FailureConfig
-# from ray.train.torch import TorchTrainer
-from ray.tune.stopper import TrialPlateauStopper
+
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.hyperopt import HyperOptSearch
-import multiprocessing
+
+# Init ray before jax
+ray.init(ignore_reinit_error=True, num_cpus=32, num_gpus=1)
 
 import run_model
 
@@ -19,12 +19,11 @@ def custom_trial_dirname_creator(trial):
 
 
 
-def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=False, cpus=16 ):
+def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=False, cpus=32 ):
 
     # create dirs and stuff
     work_dir = os.getcwd()
     storage_path = os.path.join(work_dir,"ray_results")
-    # tmp_dir = os.path.join(work_dir,"tmp")
     tmp_dir = "/tmp/ray_tmp"  # much shorter path
 
     trials_dir = os.path.join(storage_path, model_name)
@@ -32,8 +31,6 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=F
     os.makedirs(tmp_dir, exist_ok=True)
     os.chmod(tmp_dir, 0o777)  # Adjust permissions as needed
     os.environ["RAY_TMPDIR"] = tmp_dir
-
-    # is_searching = True if num_samples > 1 else False
 
     search_space = {
         "model_name": model_name,
@@ -50,14 +47,13 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=F
         "Rs": tune.loguniform(0.05,5.0),
         "N": tune.randint(1,7),
         **{f"R_{i}": tune.loguniform(0.01, 5.0) for i in range(6)},
-        **{f"C_{i}": tune.uniform(1.0, 100.0) for i in range(6)},
+        **{f"C_{i}": tune.uniform(10.0, 100.0) for i in range(6)},
         **{f"alpha_{i}": tune.uniform(0.5, 1.0) for i in range(6)},
 
     }
 
     hyperopt_search = HyperOptSearch(metric="bic", mode="min")
 
-    # ASHA scheduler
     asha_scheduler = ASHAScheduler(
         metric="bic",
         mode="min",
@@ -67,7 +63,6 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=F
         brackets=2              # more brackets = more exploration in the parameters
     )
     
-    
     # running config
     run_config = RunConfig(
         name=model_name,
@@ -75,28 +70,28 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=F
         failure_config=FailureConfig(max_failures=0),
     )
 
+    trainable = tune.with_resources(
+        tune.with_parameters(run_model.run_model),
+        resources={"cpu": cpus, "gpu": gpus_per_trial}
+    )
+
     # Restore or run a new tuning
     if tune.Tuner.can_restore(trials_dir):
         tuner = tune.Tuner.restore(
             trials_dir, 
-            trainable=tune.with_resources(
-                tune.with_parameters(run_model.run_model),
-                resources={"cpu": cpus,"gpu": gpus_per_trial}
-            ), 
+            trainable=trainable,
             resume_errored=True,
             param_space= search_space
         )
     else:
 
         tuner = tune.Tuner(
-            trainable=tune.with_resources(
-                tune.with_parameters(run_model.run_model),
-                resources={"cpu": cpus,"gpu": gpus_per_trial}
-            ),
+            trainable=trainable,
             tune_config=tune.TuneConfig(
                 search_alg=hyperopt_search,  
-                scheduler=asha_scheduler,  
+                scheduler=asha_scheduler, 
                 num_samples=num_samples,  # Adjust based on budget
+                max_concurrent_trials= 8,
                 trial_dirname_creator= custom_trial_dirname_creator
             ),
             param_space=search_space,
@@ -137,32 +132,10 @@ if __name__ == "__main__":
     parser.add_argument("-f","--frequency",choices=["10","100","1000","10000","30000"],help="Chose the frequency",default="30000")
     parser.add_argument("-d", "--debug", action="store_true", help="debug")
     parser.add_argument("-g", "--gpus", help="Number of GPUs, default is 1",default=0.25)
-    parser.add_argument("-c", "--cpus", help="Number of CPUs, default is 16",default=16)
+    parser.add_argument("-c", "--cpus", help="Number of CPUs, default is 16",default=4)
 
     args = parser.parse_args()
 
-    # grab cpu and gpu from available info
-    num_cpus = int(os.environ.get("SLURM_CPUS_ON_NODE", "8"))
-    num_gpus = len(os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")) if "CUDA_VISIBLE_DEVICES" in os.environ else 0
-
-
-    # Set multiprocessing start method first (critical)
-    multiprocessing.set_start_method("spawn", force=True)
-    # model_name = "param_search"
-
-    # # Then initialize Ray 
-    # ray.init(
-    #     num_cpus=num_cpus,
-    #     num_gpus=num_gpus,
-    #     runtime_env={"env_vars": {
-    #         "JAX_PLATFORM_NAME": "gpu",
-    #         "XLA_FLAGS": "--xla_cpu_multi_thread_eigen=false",  # Optional: disables JAX CPU threading
-    #         "OMP_NUM_THREADS": "1",  # For numpy/BLAS/OpenMP conflicts
-    #         "MKL_NUM_THREADS": "1"
-    #     }},
-    #     # _plasma_directory="/tmp",  # Optional, good for tmpdir management
-    #     ignore_reinit_error=True,
-    # )
 
     model_name = f"{args.name}_{args.frequency}_hz"
 

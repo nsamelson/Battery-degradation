@@ -94,9 +94,15 @@ def plot_param_to_perf(exp_name, parameter, freq):
     ax2.grid(True, which="both", axis="y", linestyle=":", linewidth=0.5, color="lightgray")
     ax2.grid(False, axis='x')  # Prevent double x-axis grid
 
-    # Improve x-axis readability
-    ax1.xaxis.set_major_locator(MaxNLocator(nbins=12, integer=True))
-    plt.xticks(rotation=45)
+    # set x axis to log scale
+    if "R_" in parameter:
+        ax1.set_xscale("log")
+        ax1.set_xscale("log")
+    else:
+
+        # Improve x-axis readability
+        ax1.xaxis.set_major_locator(MaxNLocator(nbins=12, integer=True))
+        plt.xticks(rotation=45)
 
     plt.tight_layout()
     out_path = os.path.join("output", exp_name, f"{parameter}_to_perf.png")
@@ -129,11 +135,11 @@ def plot_boxplots(exp_name, freq):
     axs[0].legend()
 
     # Annotate counts under each tick
-    for xtick in axs[0].get_xticks():
-        n_value = int(axs[0].get_xticklabels()[xtick].get_text())
-        count = count_dict.get(n_value, 0)
-        axs[0].text(xtick, axs[0].get_ylim()[0] - 0.1, f'n={count}', 
-                    ha='center', va='top', fontsize=9, color='gray')
+    # for xtick in axs[0].get_xticks():
+    #     n_value = int(axs[0].get_xticklabels()[xtick].get_text())
+    #     count = count_dict.get(n_value, 0)
+    #     axs[0].text(xtick, axs[0].get_ylim()[0] - 0.1, f'n={count}', 
+    #                 ha='center', va='top', fontsize=9, color='gray')
 
     # MSE plot
     sns.boxplot(data=df, x="N", y="mse", color="dodgerblue", ax=axs[1])
@@ -149,11 +155,11 @@ def plot_boxplots(exp_name, freq):
     axs[1].legend()
 
     # Annotate counts under each tick
-    for xtick in axs[1].get_xticks():
-        n_value = int(axs[1].get_xticklabels()[xtick].get_text())
-        count = count_dict.get(n_value, 0)
-        axs[1].text(xtick, axs[1].get_ylim()[0] * 0.9, f'n={count}', 
-                    ha='center', va='top', fontsize=9, color='gray')
+    # for xtick in axs[1].get_xticks():
+    #     n_value = int(axs[1].get_xticklabels()[xtick].get_text())
+    #     count = count_dict.get(n_value, 0)
+    #     axs[1].text(xtick, axs[1].get_ylim()[0] * 0.9, f'n={count}', 
+    #                 ha='center', va='top', fontsize=9, color='gray')
 
     plt.tight_layout(rect=[0, 0, 1, 1])
     out_path = os.path.join("output", exp_name, "bic_and_mse.png")
@@ -178,7 +184,7 @@ if __name__ == "__main__":
 
     # plot_signals(x, y_true, y_pred, params)
     freq = 30000
-    exp_name = f"bic_new_range_{freq}_hz"
+    exp_name = f"bic_test_{freq}_hz"
     parameters = ["Rs","C_0","R_0","alpha_0"]
 
     extract_experiments(exp_name)
