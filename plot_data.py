@@ -177,8 +177,8 @@ if __name__ == "__main__":
     # # print(x.shape,y_true.shape,y_pred.shape)
 
     # plot_signals(x, y_true, y_pred, params)
-    freq = 1000
-    exp_name = f"bic_{freq}_hz"
+    freq = 30000
+    exp_name = f"newtest_{freq}_hz"
     parameters = ["Rs","C_0","R_0","alpha_0"]
 
     extract_experiments(exp_name)
