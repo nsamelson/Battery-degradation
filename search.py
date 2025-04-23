@@ -41,13 +41,16 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=F
         "seed_value": 42,
         "freq":freq,
         "debug":debug,
+        "reduce_sampling": False,
+        "target_fss":25000,
+        "sim_duration": 20.0,
 
 
         # search space       
-        "Rs": tune.uniform(0.1,1000),
+        "Rs": tune.loguniform(0.05,1.0),
         "N": tune.randint(1,7),
-        **{f"R_{i}": tune.uniform(0.5, 5.0) for i in range(6)},
-        **{f"C_{i}": tune.loguniform(0.05, 10.0) for i in range(6)},
+        **{f"R_{i}": tune.loguniform(0.01, 5.0) for i in range(6)},
+        **{f"C_{i}": tune.loguniform(10.0, 1000.0) for i in range(6)},
         **{f"alpha_{i}": tune.uniform(0.5, 1.0) for i in range(6)},
 
     }
