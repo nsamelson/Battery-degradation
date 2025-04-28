@@ -40,6 +40,16 @@ def compute_bic(n, mse, num_params):
     bic = n * np.log(mse) + num_params * np.log(n)
     return bic
 
+def compute_aic(n, mse, num_params):
+    aic = n * np.log(mse) + num_params * 2
+    return aic
+
+def compute_exact_bic(n, mle, num_params):
+    bic_exact = -2 * mle + num_params * np.log(n)
+    return bic_exact
+
+def compute_log_likelihood(mse, n):
+    return -0.5 * n * (np.log(2 * np.pi * mse) + 1)
 
 def reduce_sampling(I, y, original_fss, target_fss, duration_s):
     """
@@ -120,24 +130,25 @@ def run_model(config:dict, is_searching=True, verbose=False):
 
     # run simulation
     y_pred = simulation.main(I,params,apply_noise=True)
+    n = y_true.shape[1] 
 
     if np.isnan(y_pred).any():
-        bic = float("inf")
         mse = float("inf")
+        mle = float("inf")
     else:       
         # compute metrics
-        n = len(y_true)   
         mse = mean_squared_error(y_true, y_pred)
-        bic = compute_bic(n,mse, N*3+1) # N*3+1 to count the real number of parameters
+        mle = compute_log_likelihood(mse,n)
+        # bic = compute_bic(n,mse, N*3+1) # N*3+1 to count the real number of parameters
 
     if is_searching:
         try:
-            tune.report(metrics={"bic":bic,"mse":mse})
+            tune.report(metrics={"mse":mse, "mle":mle, "n":n})
         finally:
             import jax
             jax.clear_backends()
 
-    return bic
+    return mse
 
 
 def main(model_name, freq=30000, debug=False):

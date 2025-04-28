@@ -19,7 +19,7 @@ def custom_trial_dirname_creator(trial):
 
 
 
-def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=False, cpus=32 ):
+def main(model_name, num_samples=1, N=1, gpus_per_trial=float(1/4),freq=30000,debug=False, cpus=32, reduce_sampling=False ):
 
     # create dirs and stuff
     work_dir = os.getcwd()
@@ -38,24 +38,25 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=F
         "seed_value": 42,
         "freq":freq,
         "debug":debug,
-        "reduce_sampling": False,
+        "reduce_sampling": reduce_sampling,
         "target_fss":25000,
         "sim_duration": 20.0,
 
 
         # search space       
-        "Rs": tune.loguniform(0.05,5.0),
-        "N": tune.randint(1,7),
-        **{f"R_{i}": tune.loguniform(0.01, 5.0) for i in range(6)},
-        **{f"C_{i}": tune.uniform(10.0, 100.0) for i in range(6)},
-        **{f"alpha_{i}": tune.uniform(0.5, 1.0) for i in range(6)},
+        "Rs": 2,
+        # "N": tune.randint(1,7),
+        "N": N,
+        **{f"R_{i}": tune.loguniform(0.01, 5.0) for i in range(N)},
+        **{f"C_{i}": tune.uniform(10.0, 100.0) for i in range(N)},
+        **{f"alpha_{i}": tune.uniform(0.5, 1.0) for i in range(N)},
 
     }
 
-    hyperopt_search = HyperOptSearch(metric="bic", mode="min")
+    hyperopt_search = HyperOptSearch(metric="mse", mode="min")
 
     asha_scheduler = ASHAScheduler(
-        metric="bic",
+        metric="mse",
         mode="min",
         max_t=1,   # Maximum number of training iterations
         # grace_period=1,         # Number of iterations before considering early stopping
@@ -99,13 +100,19 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=F
         )
         
     results = tuner.fit()
-    best_result = results.get_best_result("bic", "min","last")
-
+    best_result = results.get_best_result("mse", "min","last")
+    n = best_result.metrics["n"]     
+    mse = best_result.metrics["mse"]        
+    mle = best_result.metrics['mle']
 
 
     print(f"Best config: {best_result.config}")
-    print(f"Best BIC : {best_result.metrics['bic']}")
+    print(f"Best MSE : {best_result.metrics['mse']}")
     # print(f"path is {best_model_path}")
+
+    best_result.metrics['bic'] = run_model.compute_bic(n,mse,3*N+1)
+    best_result.metrics['aic'] = run_model.compute_aic(n,mse,3*N+1)
+    best_result.metrics['bic_exact'] = run_model.compute_exact_bic(n,mle,3*N+1)
     print(best_result)
 
     # save best model
@@ -128,16 +135,26 @@ def main(model_name, num_samples=1, gpus_per_trial=float(1/4),freq=30000,debug=F
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-n","--name",help="Name of the experiment",default="default")
+    parser.add_argument("-N","--number_blocks",help="Number of blocks" ,default=1)
     parser.add_argument("-s","--samples",help="Number of samples",default=100)
     parser.add_argument("-f","--frequency",choices=["10","100","1000","10000","30000"],help="Chose the frequency",default="30000")
     parser.add_argument("-d", "--debug", action="store_true", help="debug")
     parser.add_argument("-g", "--gpus", help="Number of GPUs, default is 1",default=0.25)
     parser.add_argument("-c", "--cpus", help="Number of CPUs, default is 16",default=4)
+    parser.add_argument("-r", "--reduce_sampling", help="Reduce sampling frequency for faster simulation",default=False)
 
     args = parser.parse_args()
 
 
-    model_name = f"{args.name}_{args.frequency}_hz"
+    model_name = f"{args.name}_{args.number_blocks}_blocks_{args.frequency}_hz"
 
     # Launch your hyperparameter search
-    main(model_name, num_samples=int(args.samples), gpus_per_trial=float(args.gpus), freq=int(args.frequency), debug=args.debug, cpus=int(args.cpus))
+    main(model_name, 
+        num_samples=int(args.samples), 
+        N=int(args.number_blocks),
+        gpus_per_trial=float(args.gpus), 
+        freq=int(args.frequency), 
+        debug=args.debug, 
+        cpus=int(args.cpus), 
+        reduce_sampling=bool(args.reduce_sampling)
+    )
