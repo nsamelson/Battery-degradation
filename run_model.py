@@ -9,7 +9,7 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 # import jax.numpy as jnp
 import h5py
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, root_mean_squared_error
 from ray.air import session
 
 from ray import tune
@@ -80,13 +80,42 @@ def reduce_sampling(I, y, original_fss, target_fss, duration_s):
     return I_down, jnp.reshape(y_down, (1, -1))
 
 
+from collections import defaultdict
 
-def run_model(config:dict, is_searching=True, verbose=False):
+def test_model(config: dict, cells=["U1", "U2", "U3", "U5", "U6"]):
+    performances = {}
+    totals = defaultdict(float)
+    N = config["N"]
+
+    for cell in cells:
+        metrics, n = run_model(config, is_searching=False, cell=cell)
+
+        metrics = {
+            "mse": metrics['mse'],
+            "mle": metrics["mle"],
+            "rmse": metrics["rmse"],
+            "nrmse": metrics["nrmse"],
+            "bic": compute_bic(n, metrics['mse'], 3 * N + 1),
+            "bic_rmse": compute_bic(n, metrics['rmse'], 3 * N + 1),
+            "bic_nrmse": compute_bic(n, metrics['nrmse'], 3 * N + 1),
+            "aic": compute_aic(n, metrics['mse'], 3 * N + 1),
+            "bic_exact": compute_exact_bic(n, metrics['mle'], 3 * N + 1),
+        }
+
+        performances[cell] = metrics
+
+        # sum the BICs and AICs 
+        for key in ["bic", "bic_exact", "aic", "bic_rmse", "bic_nrmse"]:
+            totals[key] += metrics[key]
+
+    performances["total"] = dict(totals)
+    return performances
+
+
+
+def run_model(config:dict, is_searching=True, verbose=False,cell="U4"):
     import jax
     import jax.numpy as jnp
-
-    print("JAX devices:", jax.devices())
-
 
     debug = config["debug"]
     freq = config["freq"]
@@ -95,7 +124,7 @@ def run_model(config:dict, is_searching=True, verbose=False):
     # Load real data
     data = load_matlab_data(config["path"], freq)
     I = jnp.array(data.get("I"))[0]
-    y_true = data.get("U4")
+    y_true = data.get(cell)
 
     params = {
         "fbs": np.array([freq]),                                        # bandwidth freq
@@ -135,20 +164,28 @@ def run_model(config:dict, is_searching=True, verbose=False):
     if np.isnan(y_pred).any():
         mse = float("inf")
         mle = float("inf")
+        rmse = float("inf")
+        nrmse = float("inf")
     else:       
         # compute metrics
         mse = mean_squared_error(y_true, y_pred)
-        mle = compute_log_likelihood(mse,n)
-        # bic = compute_bic(n,mse, N*3+1) # N*3+1 to count the real number of parameters
+        rmse = root_mean_squared_error(y_true,y_pred)
+        nrmse = rmse / (y_true[0].max() - y_true[0].min())
+        mle = compute_log_likelihood(nrmse,n)
+
+    metrics={"mse":mse, "mle":mle, "rmse":rmse, "nrmse":nrmse}
 
     if is_searching:
         try:
-            tune.report(metrics={"mse":mse, "mle":mle, "n":n})
+            tune.report(metrics=metrics)
         finally:
             import jax
-            jax.clear_backends()
+            try:
+                jax.clear_backends()
+            except:
+                print("parameters lead to system unstable")
 
-    return mse
+    return metrics, n
 
 
 def main(model_name, freq=30000, debug=False):
