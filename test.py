@@ -3,6 +3,11 @@ import os
 import h5py
 import numpy as np
 import pandas as pd
+import json
+
+import plot_data
+import run_model
+import simulation
 
 def model_diagnostics(y_true, y_pred, n_params):
     """
@@ -99,16 +104,60 @@ def load_matlab_data(path, freq):
     return data
 
 
-def test_dataset():
+def test_dataset(freq=1000):
     import jax.numpy as jnp
 
 
-    data = load_matlab_data("data", 10)
+    # load data
+    data = load_matlab_data("data", freq)
     I = jnp.array(data.get("I"))[0]
     y_true = data.get("U4")
 
+    # load best config
+    conf_path = "output/test3_2_blocks_1000_hz/best_config.json"
+    with open(conf_path,"r") as f:
+        config = json.load(f)
+    N = config["N"]
+
+    params = {
+        "fbs": np.array([freq]),                                        # bandwidth freq
+        "durations": data.get("duration")[0],           
+        "fss": data.get("fs")[0],                                       # sampling freq
+        # "Rs": jnp.array(config["Rs"]),                                  # Resistance of supply?
+        # "R": jnp.array([config[f"R_{i}"] for i in range(N)]),           # Resistance
+        # "C": jnp.array([config[f"C_{i}"] for i in range(N)]),           # Capacitance
+        # "alpha": jnp.array([config[f"alpha_{i}"] for i in range(N)])    # Fractional factor
+        "Rs": jnp.array(2),                                  # Resistance of supply?
+        "R": jnp.array([.05, .12, .3]),
+        "C": jnp.array([.7, 100, 1500]),
+        "alpha": jnp.array([0.3, 0.9, 1.]),
+    }
+
+    start = 0
+    end = 2000
+    I = I[start:end]
+    y_true = y_true[:,start:end]
+    
+
+    y_pred = simulation.main(I,params,apply_noise=False)
+
+    # x= jnp.expand_dims(I,0)
+    # print(x, y_true)
+
+    from sklearn.metrics import mean_squared_error, mean_absolute_error, root_mean_squared_error, mean_absolute_percentage_error
+    mse = mean_squared_error(y_true[0], y_pred[0])
+    rmse = root_mean_squared_error(y_true,y_pred)
+    mae = mean_absolute_error(y_true,y_pred)
+    mape = mean_absolute_percentage_error(y_true,y_pred)
+    nrmse = rmse / (y_true[0].max() - y_true[0].min())
+    print(mse, mae, rmse, mape, nrmse)
+
+    plot_data.plot_signals(I,y_true[0],y_pred[0],params)
+
     return I, y_true
 
+
+    
 
 # Example usage:
 if __name__ == "__main__":
@@ -125,5 +174,5 @@ if __name__ == "__main__":
 
     x, y_true = test_dataset()
 
-    print(x.shape, x.mean(), x.std(), x.min(), x.max())
-    print(y_true.shape, y_true.mean(), y_true.std(), y_true.min(), y_true.max())
+    # print(x.shape, x.mean(), x.std(), x.min(), x.max())
+    # print(y_true.shape, y_true.mean(), y_true.std(), y_true.min(), y_true.max())

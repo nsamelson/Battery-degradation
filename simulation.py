@@ -20,8 +20,6 @@ def main(I, parameters:dict, apply_noise=False):
     import jax
     import jax.numpy as jnp
     # Set global seed
-    np.random.seed(42)
-    jax_key = jax.random.PRNGKey(42)
 
     fbs = parameters["fbs"]
     fss = parameters["fss"]
@@ -31,19 +29,19 @@ def main(I, parameters:dict, apply_noise=False):
     C = parameters["C"]
     alpha = parameters["alpha"]
 
-    # Output parameters
-    responses = []
+    # wraps functions with jit
+    sim = jax.jit(sim_z)
+    white_noise = jax.jit(add_white_noise)
 
-    for i in enumerate(fbs):
+    def simulate_single(fb, i):
+        y = sim(Rs, R, C, alpha, fss, I)
 
-        # generate output response
-        y = sim_z(Rs, R, C, alpha, fss, I)
-
-        # add noise
         if apply_noise:
-            y = add_white_noise(y, 0.05, jax.random.fold_in(jax_key, 100))
+            key = jax.random.fold_in(jax.random.PRNGKey(42), i)
+            y = white_noise(y, 0.01, key)
+        return jnp.asarray(y, copy=True)
 
-        responses.append(jnp.asarray(y, copy=True))
+    responses = jax.vmap(simulate_single, in_axes=(0, 0))(fbs, jnp.arange(len(fbs)))
 
     return responses
 
