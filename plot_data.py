@@ -20,8 +20,8 @@ def plot_signals(x, y_true, y_pred, params):
     time = np.linspace(0, len(x)/params['fbs'], len(x))
     
     # Plot response and excitation on the same subplot
-    ax.plot(time, y_pred, color=colors[0], linestyle=linestyles[1], alpha=0.4, label=f'y_pred')
-    ax.plot(time, y_true, color=colors[1], linestyle=linestyles[1], alpha=0.4, label=f'y_true')
+    ax.plot(time, y_pred, color=colors[0], linestyle=linestyles[0], alpha=0.4, label=f'y_pred')
+    ax.plot(time, y_true, color=colors[1], linestyle=linestyles[0], alpha=0.4, label=f'y_true')
     ax.plot(time, x, color=colors[2], linestyle=linestyles[0],  label=f'Excitation')
     ax.set_title(f'Simulation vs Ground truth')
     ax.set_xlim([0, time[-1]])
@@ -51,7 +51,7 @@ def extract_experiments(exp_name):
                 result = json.load(f)
 
             flat_record = {
-                "bic": result["bic"],
+                "mle": result["mle"],
                 "mse": result["mse"]
             }
             # Flatten config
@@ -62,9 +62,12 @@ def extract_experiments(exp_name):
 
     df = pd.DataFrame(records)
 
-    out_folder = os.path.join("output", exp_name)
+    # split name into exp name and settings
+    split_name = exp_name.split("_")  
+
+    out_folder = os.path.join("output", '_'.join(split_name[:2]))
     os.makedirs(out_folder, exist_ok=True)
-    df.to_csv(os.path.join(out_folder, "results.csv"), index=False)
+    df.to_csv(os.path.join(out_folder, f"results_{'_'.join(split_name[2:])}.csv"), index=False)
 
 
 def plot_param_to_perf(exp_name, parameter, freq):
@@ -73,19 +76,24 @@ def plot_param_to_perf(exp_name, parameter, freq):
 
     if parameter not in df.columns:
         raise ValueError(f"Parameter '{parameter}' not found in results.")
+    
+    # palette = sns.color_palette("viridis", as_cmap=False, n_colors=6)
+
 
     fig, ax1 = plt.subplots(figsize=(14, 6))
     fig.suptitle(f"BIC and MSE over parameter {parameter} at {freq} Hz", fontsize=16)
 
     # Primary axis - BIC
-    sns.scatterplot(data=df, x=parameter, y="bic", ax=ax1, color="royalblue", s=30, alpha=0.6)
+    sns.scatterplot(data=df, x=parameter, y="bic", ax=ax1, color="royalblue", s=30, alpha=0.6,)
+    # sns.scatterplot(data=df, x=parameter, y="bic", ax=ax1, hue="alpha_0", palette="viridis", color="royalblue", s=30, alpha=0.6, legend=False)
     ax1.set_ylabel("BIC", color="black")
     ax1.tick_params(axis='y', labelcolor="black")
     ax1.grid(True, which="major", linestyle='--', linewidth=0.5, color='lightgray')
 
     # Secondary axis - MSE (log scale)
     ax2 = ax1.twinx()
-    sns.scatterplot(data=df, x=parameter, y="mse", ax=ax2, color="royalblue", marker="o", s=30, alpha=0.6)
+    sns.scatterplot(data=df, x=parameter, y="mse", ax=ax2, color="royalblue", marker="o", s=30, alpha=0.6,)
+    # sns.scatterplot(data=df, x=parameter, y="mse", ax=ax2, hue="alpha_0", palette="viridis", color="royalblue", marker="o", s=30, alpha=0.6, legend=False)
     ax2.set_ylabel("MSE (log scale)", color="black")
     ax2.set_yscale("log")
     ax2.tick_params(axis='y', labelcolor="black")
@@ -183,14 +191,22 @@ if __name__ == "__main__":
     # # print(x.shape,y_true.shape,y_pred.shape)
 
     # plot_signals(x, y_true, y_pred, params)
-    freq = 30000
-    exp_name = f"bic_test_{freq}_hz"
+    freq = 10
+    exp_name = f"bic_aic"
     parameters = ["Rs","C_0","R_0","alpha_0"]
+    # parameters = ["C_1","R_1","alpha_1", "C_2","R_2","alpha_2", "C_3","R_3","alpha_3", "C_4","R_4","alpha_4", ]
 
-    extract_experiments(exp_name)
-    plot_boxplots(exp_name,freq)
 
-    for param in parameters:
-        plot_param_to_perf(exp_name,param,freq)
+    for N in range (1,7):
+        full_name = f"{exp_name}_{N}_blocks_{freq}_hz"
+        try:
+            extract_experiments(full_name)
+        except:
+            print(f"experiment {N} not found")
+    
+    # plot_boxplots(exp_name,freq)
+
+    # for param in parameters:
+    #     plot_param_to_perf(exp_name,param,freq)
 
 
