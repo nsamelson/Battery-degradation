@@ -3,11 +3,12 @@ import vb_eis.state_space_sim as state_space_sim
 import numpy as np
 
 
-def sim_z(Rs, R, C, alfa,fs, I):
+def sim_z(Rs, R, C, alfa,fs, I, init=0.):
     import jax.numpy as jnp
     A, bl, m, d, T_end = state_space_sim.jgen(Rs,R,C,alfa,fs,len(I))
     mask = state_space_sim.generate_mask(A.shape)
     x_init = jnp.zeros(A.shape)
+    # x_init[0,:] = init
     return state_space_sim.forward_sim(A, bl, m, d, x_init, I, mask)
 
 def add_white_noise(data, noise_level, key):
@@ -38,7 +39,7 @@ def main(I, parameters:dict, apply_noise=False):
 
         if apply_noise:
             key = jax.random.fold_in(jax.random.PRNGKey(42), i)
-            y = white_noise(y, 0.01, key)
+            y = white_noise(y, 0.001, key)
         return jnp.asarray(y, copy=True)
 
     responses = jax.vmap(simulate_single, in_axes=(0, 0))(fbs, jnp.arange(len(fbs)))
