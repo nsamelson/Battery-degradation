@@ -22,7 +22,7 @@ def plot_signals(x, y_true, y_pred, params):
     # Plot response and excitation on the same subplot
     ax.plot(time, y_pred, color=colors[0], linestyle=linestyles[0], alpha=0.4, label=f'y_pred')
     ax.plot(time, y_true, color=colors[1], linestyle=linestyles[0], alpha=0.4, label=f'y_true')
-    ax.plot(time, x, color=colors[2], linestyle=linestyles[0],  label=f'Excitation')
+    # ax.plot(time, x, color=colors[2], linestyle=linestyles[0],  label=f'Excitation')
     ax.set_title(f'Simulation vs Ground truth')
     ax.set_xlim([0, time[-1]])
     ax.legend()
