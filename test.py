@@ -110,36 +110,40 @@ def test_dataset(freq=1000):
 
     # load data
     data = load_matlab_data("data", freq)
-    I = jnp.array(data.get("I"))[0]
+    i_orig = jnp.array(data.get("I"))[0]
     y_true = data.get("U4")
 
+    # correct signal
+    i_corr = i_orig*(-1) * 50/.625
+    y_true[0] -= np.mean(y_true[0])
+
     # load best config
-    conf_path = "output/test3_2_blocks_1000_hz/best_config.json"
+    conf_path = "output/test3_3_blocks_1000_hz/best_config.json"
     with open(conf_path,"r") as f:
         config = json.load(f)
     N = config["N"]
 
     params = {
-        "fbs": np.array([freq]),                                        # bandwidth freq
+        "fbs": jnp.array([freq]),                                        # bandwidth freq
         "durations": data.get("duration")[0],           
         "fss": data.get("fs")[0],                                       # sampling freq
         # "Rs": jnp.array(config["Rs"]),                                  # Resistance of supply?
         # "R": jnp.array([config[f"R_{i}"] for i in range(N)]),           # Resistance
         # "C": jnp.array([config[f"C_{i}"] for i in range(N)]),           # Capacitance
         # "alpha": jnp.array([config[f"alpha_{i}"] for i in range(N)])    # Fractional factor
-        "Rs": jnp.array(2),                                  # Resistance of supply?
-        "R": jnp.array([.05, .12, .3]),
-        "C": jnp.array([.7, 100, 1500]),
-        "alpha": jnp.array([0.3, 0.9, 1.]),
+        "Rs": jnp.array(.25/80),                                  
+        "R": jnp.array([.05, .3, 1.])*40,
+        "C": jnp.array([20., 50., 1000.]),
+        "alpha": jnp.array([.75, .99, .99]),
     }
 
     start = 0
     end = 2000
-    I = I[start:end]
+    i_corr = i_corr[start:end]
     y_true = y_true[:,start:end]
     
 
-    y_pred = simulation.main(I,params,apply_noise=False)
+    y_pred = simulation.main(i_corr - np.mean(i_corr),params,apply_noise=True)
 
     # x= jnp.expand_dims(I,0)
     # print(x, y_true)
@@ -149,12 +153,13 @@ def test_dataset(freq=1000):
     rmse = root_mean_squared_error(y_true,y_pred)
     mae = mean_absolute_error(y_true,y_pred)
     mape = mean_absolute_percentage_error(y_true,y_pred)
+    cae = run_model.cumulative_absolute_error(y_true,y_pred)
     nrmse = rmse / (y_true[0].max() - y_true[0].min())
-    print(mse, mae, rmse, mape, nrmse)
+    print(mse, mae, rmse, mape, nrmse, cae)
 
-    plot_data.plot_signals(I,y_true[0],y_pred[0],params)
+    plot_data.plot_signals(i_corr,y_true[0],y_pred[0] ,params)
 
-    return I, y_true
+    return i_corr, y_true
 
 
     
