@@ -145,15 +145,16 @@ def run_model(config:dict, is_searching=True, verbose=False,cell="U4"):
 
 
 
-    if config.get("reduce_sampling",False):
-        target_fss = config.get("target_fss", 25000)
-        duration = config.get("sim_duration", 20.0)  # seconds
+    if config.get("reduce_sampling_factor",1) != 1:
+        # duration = config.get("sim_duration", 20.0)  # seconds
+        target_fss = params["fss"] // config["reduce_sampling_factor"]
 
-        I, y_true = reduce_sampling(I, y_true, data["fs"][0], target_fss, duration)
+        # for the time being, keep same
+        I, y_true = reduce_sampling(I, y_true, data["fs"][0], target_fss, params["durations"])
 
         # Update fss and durations in params to reflect downsampling
         params["fss"] = np.array([target_fss])
-        params["durations"] = np.array([duration])
+        # params["durations"] = np.array([duration])
 
 
     if verbose:
@@ -208,9 +209,9 @@ def main(model_name, freq=30000, debug=False):
         "seed_value": 42,
         "freq":freq,
         "debug":debug,
-        "reduce_sampling": True,
-        "target_fss":25000,
-        "sim_duration": 20.0,
+        "reduce_sampling_factor": True,
+        # "target_fss":25000,
+        # "sim_duration": 20.0,
 
 
         # search space       

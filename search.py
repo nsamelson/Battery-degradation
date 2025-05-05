@@ -34,7 +34,7 @@ def clean_for_json(obj):
         return obj
 
 
-def main(model_name, num_samples=1, N=1, gpus_per_trial=float(1/4),freq=30000,debug=False, cpus=32, reduce_sampling=False ):
+def main(model_name, num_samples=1, N=1, gpus_per_trial=float(1/4),freq=30000,debug=False, cpus=32, reduce_sampling_factor=1 ):
 
     # create dirs and stuff
     work_dir = os.getcwd()
@@ -53,9 +53,9 @@ def main(model_name, num_samples=1, N=1, gpus_per_trial=float(1/4),freq=30000,de
         "seed_value": 42,
         "freq":freq,
         "debug":debug,
-        "reduce_sampling": reduce_sampling,
-        "target_fss":25000,
-        "sim_duration": 20.0,
+        "reduce_sampling_factor": reduce_sampling_factor,
+        # "target_fss":25000,
+        # "sim_duration": 20.0,
 
 
         # search space       
@@ -86,7 +86,7 @@ def main(model_name, num_samples=1, N=1, gpus_per_trial=float(1/4),freq=30000,de
         name=model_name,
         storage_path=storage_path,
         failure_config=FailureConfig(max_failures=0),
-        stop= GlobalNoImprovementStopper(min(num_samples,50), opti_metric)
+        # stop= GlobalNoImprovementStopper(min(num_samples,50), opti_metric)
     )
 
     trainable = tune.with_resources(
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--debug", action="store_true", help="debug")
     parser.add_argument("-g", "--gpus", help="Number of GPUs, default is 1",default=0.25)
     parser.add_argument("-c", "--cpus", help="Number of CPUs, default is 16",default=4)
-    parser.add_argument("-r", "--reduce_sampling", help="Reduce sampling frequency for faster simulation",default=False)
+    parser.add_argument("-r", "--reduce_sampling_factor", help="Reduce sampling frequency for faster simulation",default=1)
 
     args = parser.parse_args()
 
@@ -170,5 +170,5 @@ if __name__ == "__main__":
         freq=int(args.frequency), 
         debug=args.debug, 
         cpus=int(args.cpus), 
-        reduce_sampling=bool(args.reduce_sampling)
+        reduce_sampling_factor=int(args.reduce_sampling_factor)
     )
