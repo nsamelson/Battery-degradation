@@ -2,22 +2,20 @@ import argparse
 import glob
 import math
 import os
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_ALLOCATOR"] = "platform"
 import random
 import numpy as np
 from sklearn.linear_model import LinearRegression
-import jax.numpy as jnp
+# import jax.numpy as jnp
 import h5py
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, root_mean_squared_error
 from ray.air import session
 
+from ray import tune
 
-import run_simulation
 
-    # Simulation frequency parameters
-    # fbs = np.array([1]) # bandwidths of the DRBS signal
-    # durations = [10]    # duration of the sampling (s)
-    # fss = [2000]         # sampling frequency
-
+import simulation
 
 
 
@@ -42,6 +40,21 @@ def compute_bic(n, mse, num_params):
     bic = n * np.log(mse) + num_params * np.log(n)
     return bic
 
+def compute_aic(n, mse, num_params):
+    aic = n * np.log(mse) + num_params * 2
+    return aic
+
+def compute_exact_bic(n, mle, num_params):
+    bic_exact = -2 * mle + num_params * np.log(n)
+    return bic_exact
+
+def compute_log_likelihood(mse, n):
+    return -0.5 * n * (np.log(2 * np.pi * mse) + 1)
+
+def cumulative_absolute_error(y_true, y_pred):
+    errors = np.abs(y_true - y_pred)
+    return np.cumsum(errors)[-1]
+
 
 def reduce_sampling(I, y, original_fss, target_fss, duration_s):
     """
@@ -61,7 +74,6 @@ def reduce_sampling(I, y, original_fss, target_fss, duration_s):
 
     downsample_ratio = int(original_fss[0] // target_fss)
     total_samples = int(duration_s * original_fss[0])
-    new_length = int(duration_s * target_fss)
 
     I_trimmed = I[:total_samples]
     y_trimmed = y[0, :total_samples]
@@ -73,8 +85,45 @@ def reduce_sampling(I, y, original_fss, target_fss, duration_s):
     return I_down, jnp.reshape(y_down, (1, -1))
 
 
+from collections import defaultdict
 
-def run_model(config:dict, is_searching=True, verbose=False):
+def test_model(config: dict, cells=["U1", "U2", "U3", "U5", "U6"]):
+    performances = {}
+    totals = defaultdict(float)
+    N = config["N"]
+
+    for cell in cells:
+        metrics, n = run_model(config, is_searching=False, cell=cell)
+
+        metrics = {
+            # "mse": metrics['mse'],
+            # "mle": metrics["mle"],
+            "rmse": metrics["rmse"],
+            "nrmse": metrics["nrmse"],
+            "cae": metrics["cae"],
+            "bic_rmse": compute_bic(n, metrics['rmse'], 3 * N + 1),
+            "bic_cae": compute_bic(n, metrics['cae'], 3 * N + 1),
+            "bic_nrmse": compute_bic(n, metrics['nrmse'], 3 * N + 1),
+            # "bic": compute_bic(n, metrics['mse'], 3 * N + 1),
+            # "aic": compute_aic(n, metrics['mse'], 3 * N + 1),
+            # "bic_exact": compute_exact_bic(n, metrics['mle'], 3 * N + 1),
+        }
+
+        performances[cell] = metrics
+
+        # sum the BICs and AICs 
+        for key in ["bic_rmse", "bic_cae", "bic_nrmse"]:
+            totals[key] += metrics[key]
+
+    performances["total"] = dict(totals)
+    return performances
+
+
+
+def run_model(config:dict, is_searching=True, verbose=False,cell="U4"):
+    import jax
+    import jax.numpy as jnp
+
     debug = config["debug"]
     freq = config["freq"]
     N = config["N"]
@@ -82,9 +131,7 @@ def run_model(config:dict, is_searching=True, verbose=False):
     # Load real data
     data = load_matlab_data(config["path"], freq)
     I = jnp.array(data.get("I"))[0]
-    y_true = data.get("U4")
-
-
+    y_true = data.get(cell)
 
     params = {
         "fbs": np.array([freq]),                                        # bandwidth freq
@@ -97,11 +144,13 @@ def run_model(config:dict, is_searching=True, verbose=False):
     }
 
 
+
     if config.get("reduce_sampling",False):
-        original_fss = data["fs"][0]  # 500000
         target_fss = config.get("target_fss", 25000)
         duration = config.get("sim_duration", 20.0)  # seconds
-        I, y_true = reduce_sampling(I, y_true, original_fss, target_fss, duration)
+
+        I, y_true = reduce_sampling(I, y_true, data["fs"][0], target_fss, duration)
+
         # Update fss and durations in params to reflect downsampling
         params["fss"] = np.array([target_fss])
         params["durations"] = np.array([duration])
@@ -112,28 +161,42 @@ def run_model(config:dict, is_searching=True, verbose=False):
         print(I.shape, y_true.shape)
 
     if debug:
-        sample_size = 10000
+        sample_size = 50000
         I = I[0:sample_size]
         y_true = y_true[:,0:sample_size]
 
+    # Correct signals
+    i_corr = I* (-1) * 50/.625 
+    y_true[0] -= np.mean(y_true[0])
 
     # run simulation
-    y_pred = run_simulation.main(I,params,apply_noise=True)
+    y_pred = simulation.main(i_corr - np.mean(i_corr) ,params,apply_noise=False)
+    n = y_true.shape[1] 
 
+    # Compute error
     if np.isnan(y_pred).any():
-        bic = float("inf")
-        session.report(metrics={"bic":bic,"mse":float("inf")}) # Penalize the trial heavily
-        return bic
+        rmse = float("inf")
+        nrmse = float("inf")
+        cae = float("inf")
+    else:       
+        rmse = root_mean_squared_error(y_true,y_pred)
+        nrmse = rmse / (y_true[0].max() - y_true[0].min())
+        cae = cumulative_absolute_error(y_true,y_pred)
 
-    # compute metrics
-    n = len(y_true)   
-    mse = mean_squared_error(y_true, y_pred)
-    bic = compute_bic(n,mse, N*3+1) # maybe N*3+1 to count the real number of parameters?
+    # metrics={"mse":mse, "mle":mle, "rmse":rmse, "nrmse":nrmse}
+    metrics={"cae":cae, "rmse":rmse, "nrmse":nrmse}
 
     if is_searching:
-        session.report(metrics={"bic":bic,"mse":mse})
+        try:
+            tune.report(metrics=metrics)
+        finally:
+            import jax
+            try:
+                jax.clear_backends()
+            except:
+                print("parameters lead to system unstable")
 
-    return bic
+    return metrics, n
 
 
 def main(model_name, freq=30000, debug=False):
