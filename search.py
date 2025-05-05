@@ -1,6 +1,7 @@
 import argparse
 import os
 import json
+import numpy as np
 import ray
 from ray import tune
 from ray.tune import RunConfig, FailureConfig
@@ -8,15 +9,29 @@ from ray.tune import RunConfig, FailureConfig
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.search.hyperopt import HyperOptSearch
 
+from pprint import pprint
 # Init ray before jax
 ray.init(ignore_reinit_error=True, num_cpus=32, num_gpus=1)
 
 import run_model
+from stopper import GlobalNoImprovementStopper
 
 def custom_trial_dirname_creator(trial):
     # Create a shorter name for the trial directory
     return f"trial_{trial.trial_id}"
 
+def clean_for_json(obj):
+
+    if isinstance(obj, dict):
+        return {k: clean_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_for_json(v) for v in obj]
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, np.generic):  # catches all np.float32, np.int64, etc.
+        return obj.item()
+    else:
+        return obj
 
 
 def main(model_name, num_samples=1, N=1, gpus_per_trial=float(1/4),freq=30000,debug=False, cpus=32, reduce_sampling=False ):
@@ -44,19 +59,21 @@ def main(model_name, num_samples=1, N=1, gpus_per_trial=float(1/4),freq=30000,de
 
 
         # search space       
-        "Rs": tune.uniform(0.5, 3.5),
+        "Rs": tune.loguniform(0.001, 10),
         # "N": tune.randint(1,7),
         "N": N,
-        **{f"R_{i}": tune.loguniform(0.01, 100.0) for i in range(N)},
-        **{f"C_{i}": tune.loguniform(0.01, 100.0) for i in range(N)},
-        **{f"alpha_{i}": tune.loguniform(0.1, 1.0) for i in range(N)},
+        **{f"R_{i}": tune.loguniform(1e-4, 10.0) for i in range(N)},
+        **{f"C_{i}": tune.loguniform(0.1, 1000.0) for i in range(N)},
+        **{f"alpha_{i}": tune.uniform(0.55, 1.0) for i in range(N)},
 
     }
 
-    hyperopt_search = HyperOptSearch(metric="nrmse", mode="min")
+    opti_metric = "cae"
+
+    hyperopt_search = HyperOptSearch(metric=opti_metric, mode="min",n_initial_points=10*(3*N+1), gamma=0.1,random_state_seed=42)
 
     asha_scheduler = ASHAScheduler(
-        metric="nrmse",
+        metric=opti_metric,
         mode="min",
         max_t=1,   # Maximum number of training iterations
         # grace_period=1,         # Number of iterations before considering early stopping
@@ -69,6 +86,7 @@ def main(model_name, num_samples=1, N=1, gpus_per_trial=float(1/4),freq=30000,de
         name=model_name,
         storage_path=storage_path,
         failure_config=FailureConfig(max_failures=0),
+        stop= GlobalNoImprovementStopper(min(num_samples,50), opti_metric)
     )
 
     trainable = tune.with_resources(
@@ -100,12 +118,14 @@ def main(model_name, num_samples=1, N=1, gpus_per_trial=float(1/4),freq=30000,de
         )
         
     results = tuner.fit()
-    best_result = results.get_best_result("nrmse", "min","last")
+    best_result = results.get_best_result(opti_metric, "min","last")
     print(f"Best config: {best_result.config}")
 
 
     test_metrics = run_model.test_model(best_result.config)
-    print(test_metrics)
+    # print(test_metrics)
+
+    pprint(clean_for_json(test_metrics), width=120)
 
     # save best model
     dir_path = os.path.join(work_dir,"output",model_name)
@@ -113,11 +133,11 @@ def main(model_name, num_samples=1, N=1, gpus_per_trial=float(1/4),freq=30000,de
     try:
         # get config
         with open(f"{dir_path}/best_config.json", "w") as outfile: 
-            json.dump(best_result.config, outfile)
+            json.dump(clean_for_json(best_result.config), outfile)
         with open(f"{dir_path}/train_metrics.json", "w") as outfile: 
-            json.dump(best_result.metrics, outfile)
+            json.dump(clean_for_json(best_result.metrics), outfile)
         with open(f"{dir_path}/test_metrics.json", "w") as outfile: 
-            json.dump(test_metrics, outfile)
+            json.dump(clean_for_json(test_metrics), outfile)
         
 
     except Exception as e:
