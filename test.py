@@ -162,7 +162,29 @@ def test_dataset(freq=1000):
     return i_corr, y_true
 
 
+def check_results(exp_name="bic_corr_noised"):
+    dirs = os.listdir("output")
+
+    result = {}
+
+    for directory in dirs:
+        if exp_name in directory:
+            test_path = os.path.join("output",directory, "test_metrics.json")
+
+            with open(test_path,"r+") as f:
+                test_metrics = json.load(f)
+
+            result[directory] = test_metrics["total"]["bic_nrmse"]
+
+    min_pair = min(result.items(), key=lambda x: x[1])
+
+    print(result)
+    print(min_pair)
     
+    best_path = os.path.join("output",min_pair[0],"best_config.json")
+    with open(best_path,"r+") as f:
+        best_config = json.load(f)
+    print(best_config)
 
 # Example usage:
 if __name__ == "__main__":
@@ -177,7 +199,9 @@ if __name__ == "__main__":
     # result = compute_grouped_bic("output/bic_full_10_hz/results.csv")
     # print(result)
 
-    x, y_true = test_dataset()
+    # x, y_true = test_dataset()
 
     # print(x.shape, x.mean(), x.std(), x.min(), x.max())
     # print(y_true.shape, y_true.mean(), y_true.std(), y_true.min(), y_true.max())
+
+    check_results("bic_corr_noised")
