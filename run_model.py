@@ -51,6 +51,11 @@ def compute_exact_bic(n, mle, num_params):
 def compute_log_likelihood(mse, n):
     return -0.5 * n * (np.log(2 * np.pi * mse) + 1)
 
+def cumulative_absolute_error(y_true, y_pred):
+    errors = np.abs(y_true - y_pred)
+    return np.cumsum(errors)[-1]
+
+
 def reduce_sampling(I, y, original_fss, target_fss, duration_s):
     """
     Downsamples and trims the signal to a shorter duration.
@@ -91,21 +96,23 @@ def test_model(config: dict, cells=["U1", "U2", "U3", "U5", "U6"]):
         metrics, n = run_model(config, is_searching=False, cell=cell)
 
         metrics = {
-            "mse": metrics['mse'],
-            "mle": metrics["mle"],
+            # "mse": metrics['mse'],
+            # "mle": metrics["mle"],
             "rmse": metrics["rmse"],
             "nrmse": metrics["nrmse"],
-            "bic": compute_bic(n, metrics['mse'], 3 * N + 1),
+            "cae": metrics["cae"],
             "bic_rmse": compute_bic(n, metrics['rmse'], 3 * N + 1),
+            "bic_cae": compute_bic(n, metrics['cae'], 3 * N + 1),
             "bic_nrmse": compute_bic(n, metrics['nrmse'], 3 * N + 1),
-            "aic": compute_aic(n, metrics['mse'], 3 * N + 1),
-            "bic_exact": compute_exact_bic(n, metrics['mle'], 3 * N + 1),
+            # "bic": compute_bic(n, metrics['mse'], 3 * N + 1),
+            # "aic": compute_aic(n, metrics['mse'], 3 * N + 1),
+            # "bic_exact": compute_exact_bic(n, metrics['mle'], 3 * N + 1),
         }
 
         performances[cell] = metrics
 
         # sum the BICs and AICs 
-        for key in ["bic", "bic_exact", "aic", "bic_rmse", "bic_nrmse"]:
+        for key in ["bic_rmse", "bic_cae", "bic_nrmse"]:
             totals[key] += metrics[key]
 
     performances["total"] = dict(totals)
@@ -137,11 +144,13 @@ def run_model(config:dict, is_searching=True, verbose=False,cell="U4"):
     }
 
 
+
     if config.get("reduce_sampling",False):
-        original_fss = data["fs"][0]  # 500000
         target_fss = config.get("target_fss", 25000)
         duration = config.get("sim_duration", 20.0)  # seconds
-        I, y_true = reduce_sampling(I, y_true, original_fss, target_fss, duration)
+
+        I, y_true = reduce_sampling(I, y_true, data["fs"][0], target_fss, duration)
+
         # Update fss and durations in params to reflect downsampling
         params["fss"] = np.array([target_fss])
         params["durations"] = np.array([duration])
@@ -156,24 +165,26 @@ def run_model(config:dict, is_searching=True, verbose=False,cell="U4"):
         I = I[0:sample_size]
         y_true = y_true[:,0:sample_size]
 
+    # Correct signals
+    i_corr = I* (-1) * 50/.625 
+    y_true[0] -= np.mean(y_true[0])
 
     # run simulation
-    y_pred = simulation.main(I,params,apply_noise=True)
+    y_pred = simulation.main(i_corr - np.mean(i_corr) ,params,apply_noise=False)
     n = y_true.shape[1] 
 
+    # Compute error
     if np.isnan(y_pred).any():
-        mse = float("inf")
-        mle = float("inf")
         rmse = float("inf")
         nrmse = float("inf")
+        cae = float("inf")
     else:       
-        # compute metrics
-        mse = mean_squared_error(y_true, y_pred)
         rmse = root_mean_squared_error(y_true,y_pred)
         nrmse = rmse / (y_true[0].max() - y_true[0].min())
-        mle = compute_log_likelihood(nrmse,n)
+        cae = cumulative_absolute_error(y_true,y_pred)
 
-    metrics={"mse":mse, "mle":mle, "rmse":rmse, "nrmse":nrmse}
+    # metrics={"mse":mse, "mle":mle, "rmse":rmse, "nrmse":nrmse}
+    metrics={"cae":cae, "rmse":rmse, "nrmse":nrmse}
 
     if is_searching:
         try:
