@@ -14,7 +14,6 @@ from pprint import pprint
 ray.init(ignore_reinit_error=True, num_cpus=32, num_gpus=1)
 
 import run_model
-from stopper import GlobalNoImprovementStopper
 
 def custom_trial_dirname_creator(trial):
     # Create a shorter name for the trial directory
