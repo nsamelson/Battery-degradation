@@ -5,7 +5,16 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 from matplotlib.ticker import MaxNLocator
+from run_model import simulation, load_matlab_data, reduce_sampling, cumulative_absolute_error, root_mean_squared_error
 
+COLORS = {
+        'U1': 'orange', 
+        'U2': 'darkgreen',    
+        'U3': 'orangered',    
+        'U4': 'darkblue',     
+        'U5': 'brown',    
+        'U6': 'violet',  
+    }
 
 def plot_signals(x, y_true, y_pred, params):
     colors = ['b', 'g', 'r', 'm']
@@ -35,8 +44,8 @@ def plot_signals(x, y_true, y_pred, params):
     plt.savefig("plots/sim_v_truth.png", dpi=300)
 
 
-def extract_experiments(exp_name):
-    folder = os.path.join("ray_results", exp_name)
+def extract_experiments(full_name,exp_name):
+    folder = os.path.join("ray_results", full_name)
     trial_paths = [
         os.path.join(folder, trial)
         for trial in os.listdir(folder)
@@ -51,8 +60,10 @@ def extract_experiments(exp_name):
                 result = json.load(f)
 
             flat_record = {
-                "mle": result["mle"],
-                "mse": result["mse"]
+                "cae": result["cae"],
+                "rmse": result["rmse"],
+                "nrmse": result["nrmse"],
+                "timestamp":result["timestamp"]
             }
             # Flatten config
             for k, v in result.get("config", {}).items():
@@ -62,12 +73,54 @@ def extract_experiments(exp_name):
 
     df = pd.DataFrame(records)
 
-    # split name into exp name and settings
-    split_name = exp_name.split("_")  
-
-    out_folder = os.path.join("output", '_'.join(split_name[:2]))
+    out_folder = os.path.join("output", exp_name,full_name)
     os.makedirs(out_folder, exist_ok=True)
-    df.to_csv(os.path.join(out_folder, f"results_{'_'.join(split_name[2:])}.csv"), index=False)
+    df.to_csv(os.path.join(out_folder, f"trials.csv"), index=False)
+
+
+def extract_metrics(exp_name, freq=10):
+    dirs = os.listdir(os.path.join("output", exp_name))
+    
+    combined_metrics = []
+
+    for directory in dirs:
+        if "." in directory:
+            continue
+        test_path = os.path.join("output",exp_name,directory,"test_metrics.json")
+        train_path = os.path.join("output",exp_name,directory,"train_metrics.json")
+
+        with open(test_path,"r+") as f:
+            test_metrics = json.load(f)
+        
+        with open(train_path,"r+") as f:
+            train_metrics = json.load(f)
+
+        # get stuff from the train json
+        flat_record = {
+            "cae": train_metrics["cae"],
+            "rmse": train_metrics["rmse"],
+            "nrmse": train_metrics["nrmse"],
+        }
+
+        # get stuff from the test json
+        for cell, metrics in test_metrics.items():
+            for k,v in metrics.items():
+                flat_record[f"{k}_{cell}"] = v
+
+        # get config
+        for k, v in train_metrics.get("config", {}).items():
+            flat_record[k] = v
+
+
+        combined_metrics.append(flat_record)
+
+    df = pd.DataFrame(combined_metrics)
+
+    df.to_csv(os.path.join("output", exp_name, f"metrics.csv"), index=False)
+  
+def get_cell_metric(metric, cell):
+    return metric if cell == "U4" else f"{metric}_{cell}"
+
 
 
 def plot_param_to_perf(exp_name, parameter, freq):
@@ -174,9 +227,215 @@ def plot_boxplots(exp_name, freq):
     plt.savefig(out_path)
     plt.close()
 
+      
+def plot_errors(exp_name):
+    df_path = os.path.join("output", exp_name, "metrics.csv")
+    df = pd.read_csv(df_path)
+
+    metrics = ['cae',"rmse","nrmse"]
+    cells = [f'U{i}' for i in range(1, 7)]
+
+    
+
+    for metric in metrics:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        width = 0.1
+        x = df['N']
+        offsets = [i * width - width*3 for i in range(len(cells))]
+
+        for i, cell in enumerate(cells):
+
+            y = df[get_cell_metric(metric, cell)] # U4 was used to "train"
+            cell_label = cell +" (train)" if cell == "U4" else cell
+            ax.bar(x + offsets[i], y, width=width, label=cell_label, color=COLORS[cell], alpha=0.8)
+        
+        ax.set_xlabel("Model Complexity (N)")
+        ax.set_ylabel(f"{metric.upper()} Value")
+        ax.set_title(f"{metric.upper()} Across Model Complexity (Train and All Cells)")
+        ax.legend()
+        ax.grid(True)
+        plt.xticks(df['N'])
+        plt.tight_layout()
+        plt.savefig(os.path.join("output",exp_name,f"{metric}_over_N.png"))
+            
+
+
+def plot_error_heatmaps(exp_name):
+    df_path = os.path.join("output", exp_name, "metrics.csv")
+    df = pd.read_csv(df_path)
+    metrics = ['cae', 'rmse', 'nrmse']
+    cells = [f'U{i}' for i in range(1, 7)]
+
+    for metric in metrics:
+        heatmap_data = pd.DataFrame({cell: df[get_cell_metric(metric,cell)] for cell in cells})
+        heatmap_data.index = df['N']
+
+        plt.figure(figsize=(10,6))
+        sns.heatmap(heatmap_data.T, annot=True, fmt=".4g", cmap="YlGnBu", cbar_kws={'label': metric.upper()})
+        plt.title(f"{metric.upper()} per Cell vs Model Complexity (N)")
+        plt.xlabel("Model Complexity (N)")
+        plt.ylabel("Cell")
+        plt.tight_layout()
+        plt.savefig(os.path.join("output", exp_name, f"{metric}_heatmap.png"))
+
+def plot_train_vs_test_error(exp_name):
+    df_path = os.path.join("output", exp_name, "metrics.csv")
+    df = pd.read_csv(df_path)
+
+    metrics = ['cae', 'rmse', 'nrmse']
+    test_cells = [f'U{i}' for i in range(1, 7) if f'U{i}' != 'U4']
+    x = df['N']
+
+    for metric in metrics:
+        train_vals = df[metric]  # U4 used as training, stored under the raw name
+        test_matrix = np.array([df[f"{metric}_{cell}"] for cell in test_cells])
+        test_mean = test_matrix.mean(axis=0)
+        test_std = test_matrix.std(axis=0)
+
+        fig, ax = plt.subplots(figsize=(10,6))
+        ax.plot(x, train_vals, label='Train (U4)', color='darkblue', linestyle='--', marker='o')
+
+        for i, cell in enumerate(test_cells):
+            ax.plot(x, df[get_cell_metric(metric,cell)], label=cell, color=COLORS[cell], linestyle='--', marker='o')
+
+        ax.plot(x, test_mean, label='Test Avg (U1,2,3,5,6)', color='black', linestyle='-', marker='s')
+        # ax.fill_between(x, test_mean - test_std, test_mean + test_std, color='gray', alpha=0.3, label='Test ±1 std dev')
+
+        ax.set_xlabel("Model Complexity (N)")
+        ax.set_ylabel(f"{metric.upper()} Value")
+        ax.set_title(f"{metric.upper()} – Train vs. Test Error Across Complexity")
+        ax.grid(True)
+        ax.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join("output", exp_name, f"{metric}_train_vs_test.png"))
+
+def plot_bic_per_cell_with_mean_lines(exp_name):
+    df_path = os.path.join("output", exp_name, "metrics.csv")
+    df = pd.read_csv(df_path)
+
+    metrics = ['bic_cae', 'bic_rmse', 'bic_nrmse']
+    cells = [f'U{i}' for i in range(1, 7) if i != 4]
+
+    for metric in metrics:
+        fig, ax = plt.subplots(figsize=(10,6))
+        x = df['N']
+
+        for cell in cells:
+            y = df[f"{metric}_{cell}"]
+            ax.plot(x, y, marker='o', label=cell, color=COLORS[cell])
+
+        # Mean BIC line
+        y_avg = df[[f"{metric}_{cell}" for cell in cells]].mean(axis=1)
+        ax.plot(x, y_avg, marker='s', linestyle='--', color='black', label='Mean BIC', linewidth=2)
+
+        ax.set_xlabel("Model Complexity (N)")
+        ax.set_ylabel("BIC Score")
+        ax.set_title(f"{metric.upper()} per Cell (Excl. U4) + Mean Across Complexity")
+        ax.grid(True)
+        ax.legend(title="Cells")
+        plt.tight_layout()
+        plt.savefig(os.path.join("output", exp_name, f"{metric}_bic_lines_mean.png"))
+
+def plot_trials_errors(exp_name):
+    base_path = os.path.join("output", exp_name)
+    dirs = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d)) and not d.startswith('.')]
+
+    colors = plt.cm.viridis(np.linspace(0, 1, len(dirs)))
+    metrics = ["cae","rmse","nrmse"]
+    metric_caps = {
+        "cae":1e6,
+        "rmse":100,
+        "nrmse":1000
+    }
+
+    for metric in metrics:
+
+        plt.figure(figsize=(12, 6))
+        for i, directory in enumerate(sorted(dirs)):
+            if i not in [2]:
+                continue
+            trials_path = os.path.join(base_path, directory, "trials.csv")
+
+            df = pd.read_csv(trials_path)
+            df = df.sort_values(by='timestamp').reset_index(drop=True)
+
+            # Limit
+            metric_values = df[metric].clip(upper=metric_caps[metric])
+
+            x = np.arange(len(metric_values))
+            plt.plot(x, metric_values, label=directory, color=colors[i], alpha=0.6)
+            
+
+        plt.xlabel("Trial Number")
+        plt.ylabel(metric.upper())
+        plt.yscale("log")
+        plt.title(f"{metric.upper()} over the trials")
+        plt.legend(title="Model Complexity")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(os.path.join(base_path, f"trials_{metric}_over_index.png"))
+        plt.close()
 
 
 
+def plot_model_output(config: dict, cell="U4", save_path=None):
+    import jax.numpy as jnp
+    freq = config["freq"]
+    N = config["N"]
+
+    
+    # Load real data
+    data = load_matlab_data("data", freq)
+    I = jnp.array(data.get("I"))[0]
+    y_true = data.get(cell)
+
+    params = {
+        "fbs": np.array([freq]),
+        "durations": data.get("duration")[0],
+        "fss": data.get("fs")[0],
+        "Rs": jnp.array(config["Rs"]),
+        "R": jnp.array([config[f"R_{i}"] for i in range(N)]),
+        "C": jnp.array([config[f"C_{i}"] for i in range(N)]),
+        "alpha": jnp.array([config[f"alpha_{i}"] for i in range(N)]),
+    }
+    print(params)
+
+    # downsample
+    down_sample_factor = 20
+    target_fss = params["fss"] // down_sample_factor
+    I, y_true = reduce_sampling(I, y_true, data["fs"][0], target_fss, params["durations"])
+    params["fss"] = np.array([target_fss])
+
+    # Correct signals
+    i_corr = I * (-1) * 50 / 0.625
+    y_true[0] -= np.mean(y_true[0])
+
+
+
+    el = 5000
+    y_pred = simulation.main(i_corr[:el] - np.mean(i_corr[:el]), params, apply_noise=False)
+
+    # Plot
+    plt.figure(figsize=(12, 6))
+    plt.plot(y_true[0][:el], label="y_true",)
+    plt.plot(y_pred[0][:el], label="y_pred", )
+    plt.title(f"Simulated Output vs True Signal (Cell {cell})")
+    plt.xlabel("Timestep")
+    plt.xlim(0,el)
+    plt.ylabel("Voltage")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path)
+    else:
+        plt.show()
+
+    # Return error metrics too if needed
+    # rmse = root_mean_squared_error(y_true, y_pred)
+    # cae = cumulative_absolute_error(y_true, y_pred)
+    # print( {"rmse": rmse, "cae": cae})
 
 if __name__ == "__main__":
     # data = np.load("output/signals.npz",allow_pickle=True)
@@ -191,19 +450,38 @@ if __name__ == "__main__":
     # # print(x.shape,y_true.shape,y_pred.shape)
 
     # plot_signals(x, y_true, y_pred, params)
-    freq = 10
-    exp_name = f"bic_aic"
-    parameters = ["Rs","C_0","R_0","alpha_0"]
+    # parameters = ["Rs","C_0","R_0","alpha_0"]
     # parameters = ["C_1","R_1","alpha_1", "C_2","R_2","alpha_2", "C_3","R_3","alpha_3", "C_4","R_4","alpha_4", ]
 
+    # ------ Parameters ------
+    freq = 10
+    exp_name = f"bic_corr"
 
-    for N in range (1,7):
-        full_name = f"{exp_name}_{N}_blocks_{freq}_hz"
-        try:
-            extract_experiments(full_name)
-        except:
-            print(f"experiment {N} not found")
-    
+    # ------ extract trials from experiments ------
+    # for N in range (1,7):
+    #     full_name = f"{exp_name}_{N}_blocks_{freq}_hz"
+    #     try:
+    #         extract_experiments(full_name,exp_name)
+    #     except:
+    #         print(f"experiment {N} not found")
+
+    # ------ combine metrics ------
+    # extract_metrics(exp_name, freq)
+
+    # ------ plot errors ------
+    # plot_errors(exp_name)
+    # plot_error_heatmaps(exp_name)
+    # plot_train_vs_test_error(exp_name)
+    # plot_bic_per_cell_with_mean_lines(exp_name)
+    # plot_trials_errors(exp_name)
+
+    # ------ plot signals -------
+    path = "output/bic_corr/bic_corr_3_blocks_10_hz"
+    with open(os.path.join(path,"best_config.json"), "r") as f:
+        config = json.load(f)
+
+    plot_model_output(config, cell="U1", save_path=os.path.join(path,"simulation_vs_true_U4.png"))
+
     # plot_boxplots(exp_name,freq)
 
     # for param in parameters:

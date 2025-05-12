@@ -162,7 +162,7 @@ def test_dataset(freq=1000):
     return i_corr, y_true
 
 
-def check_results(exp_name="bic_corr_noised"):
+def check_results(exp_name="bic_corr"):
     dirs = os.listdir("output")
 
     result = {}
@@ -174,17 +174,24 @@ def check_results(exp_name="bic_corr_noised"):
             with open(test_path,"r+") as f:
                 test_metrics = json.load(f)
 
-            result[directory] = test_metrics["total"]["bic_nrmse"]
+            result[directory] = test_metrics["total"]["bic_cae"]
+            blocks = directory.split("_")[2]
+            print("- N=",blocks,", BIC=","%.2f" % result[directory])
 
     min_pair = min(result.items(), key=lambda x: x[1])
 
     print(result)
     print(min_pair)
-    
-    best_path = os.path.join("output",min_pair[0],"best_config.json")
-    with open(best_path,"r+") as f:
+
+    best_config_path = os.path.join("output",min_pair[0],"best_config.json")
+    with open(best_config_path,"r+") as f:
         best_config = json.load(f)
     print(best_config)
+
+    best_metrics_path = os.path.join("output",min_pair[0],"test_metrics.json")
+    with open(best_metrics_path,"r+") as f:
+        best_metrics_path = json.load(f)
+    print(best_metrics_path)
 
 # Example usage:
 if __name__ == "__main__":
@@ -204,4 +211,4 @@ if __name__ == "__main__":
     # print(x.shape, x.mean(), x.std(), x.min(), x.max())
     # print(y_true.shape, y_true.mean(), y_true.std(), y_true.min(), y_true.max())
 
-    check_results("bic_corr_noised")
+    check_results("bic_corr")
