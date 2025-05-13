@@ -4,6 +4,7 @@ import numpy as np
 import argparse
 import os
 import json
+from EarlyStopping import EarlyStopping
 import run_model
 import optax
 import jax
@@ -49,18 +50,21 @@ def train_loop(params, I, y_true, fs, num_steps=1000, lr=1e-3):
     # )
     opt_state = optimizer.init(params)
 
+    early_stopper = EarlyStopping(patience=25, min_delta=1e-5)
+
     losses = []
     pbar = tqdm(range(num_steps), desc="Training")
     for _ in pbar:
         params, opt_state, loss = step(params, opt_state, I, y_true, optimizer, fs)
-
-        if jnp.isnan(loss):
-            print("Loss exploded to NaN—stopping!")
-            print(params)
-            break
-        losses.append(loss.item())
-        pbar.set_description(f"Loss={loss:.3e}")
         
+        losses.append(loss.item())
+        pbar.set_description(f"Loss={loss:.4e}")
+
+        early_stopper(loss.item())
+        if early_stopper.should_stop:
+            print(f"Early stopping triggered after {early_stopper.patience} epochs without improvement.")
+            break
+            
     return params, losses
 
 
@@ -117,7 +121,7 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
 
 
     # run training
-    trained_params, losses = train_loop(params, I, U, num_steps=iters, lr=1e-2, fs=fs)
+    trained_params, losses = train_loop(params, I, U, num_steps=iters, lr=1e-3, fs=fs)
 
     # final simulation
     y_pred = sim_z(I=I,fs=fs, **trained_params)
