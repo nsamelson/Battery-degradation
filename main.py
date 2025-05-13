@@ -73,7 +73,7 @@ def train_loop(params, I, y_true, fs, num_steps=1000):
         
         losses.append(loss.item())
         pbar.set_description(
-            f"Loss={loss:.4e}, R={[f'{r:.4f}' for r in params['R'].tolist()]}, "
+            f"Loss={loss:.4e}, Rs={params['Rs']:.4f}, R={[f'{r:.4f}' for r in params['R'].tolist()]}, "
             f"C={[f'{c:.4f}' for c in params['C'].tolist()]}, "
             f"a={[f'{a:.4f}' for a in params['alpha'].tolist()]}"
         )
