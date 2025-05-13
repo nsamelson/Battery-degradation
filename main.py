@@ -30,6 +30,24 @@ def compute_loss(params, y, U, fs):
     loss = jnp.sum(optax.squared_error(y_pred, U))
     return loss
 
+def make_optimizer(params, lr_res=1e-3, lr_alpha=1e-4, lr_cap=1e-2):
+    res_optim   = optax.adam(learning_rate=lr_res)
+    alpha_optim = optax.adam(learning_rate=lr_alpha)
+    cap_optim   = optax.adam(learning_rate=lr_cap)
+
+    res_mask   = {k: (k == 'Rs' or k == 'R')   for k in params}
+    alpha_mask = {k: (k == 'alpha')            for k in params}
+    cap_mask   = {k: (k == 'C' or k == 'Q')    for k in params}
+
+    optimizer = optax.chain(
+        optax.masked(res_optim,   res_mask),
+        optax.masked(alpha_optim, alpha_mask),
+        optax.masked(cap_optim,   cap_mask),
+    )
+
+    return optimizer
+
+
 def step(params, opt_state, I, U, optimizer, fs):
     loss, grads = jax.value_and_grad(compute_loss)(params, I, U, fs)
     updates, opt_state = optimizer.update(grads, opt_state)
@@ -42,12 +60,8 @@ def step(params, opt_state, I, U, optimizer, fs):
     params['C'] = jnp.clip(params['C'],         a_min=1.0, a_max=4.0)
     return params, opt_state, loss
 
-def train_loop(params, I, y_true, fs, num_steps=1000, lr=1e-3):
-    optimizer = optax.adam(learning_rate=lr)
-    # optimizer = optax.chain(
-    #     optax.clip_by_global_norm(1.0),
-    #     optax.adam(lr)
-    # )
+def train_loop(params, I, y_true, fs, num_steps=1000):
+    optimizer = make_optimizer(params)
     opt_state = optimizer.init(params)
 
     early_stopper = EarlyStopping(patience=25, min_delta=1e-5)
@@ -58,8 +72,12 @@ def train_loop(params, I, y_true, fs, num_steps=1000, lr=1e-3):
         params, opt_state, loss = step(params, opt_state, I, y_true, optimizer, fs)
         
         losses.append(loss.item())
-        pbar.set_description(f"Loss={loss:.4e}")
-
+        pbar.set_description(
+            f"Loss={loss:.4e}, R={[f'{r:.4f}' for r in params['R'].tolist()]}, "
+            f"C={[f'{c:.4f}' for c in params['C'].tolist()]}, "
+            f"a={[f'{a:.4f}' for a in params['alpha'].tolist()]}"
+        )
+        # Early stop
         early_stopper(loss.item())
         if early_stopper.should_stop:
             print(f"Early stopping triggered after {early_stopper.patience} epochs without improvement.")
@@ -104,24 +122,27 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
     fs = float(data["fs"])
 
     # decimate and correct offset
-    I = correct_signal(decimate_signal(data["I"],fs,sampling_frequency))[:el]
-    U = decimate_signal(data["U1"],fs,sampling_frequency)[:el]
+    I = correct_signal(decimate_signal(data["I"],fs,sampling_frequency))
+    U = decimate_signal(data["U1"],fs,sampling_frequency)
+
+    if debug:
+        U= U[:el]
+        I= I[:el]
+
     I -= jnp.mean(I)
     U -= jnp.mean(U)
 
     # init parameters
-    # params = {
-    #     'Rs':    jnp.array(3e-3),                   # initial supply resistance
-    #     'R':     jnp.ones((N,)) * 1e-2,             # block resistances
-    #     'C':     jnp.ones((N,)) * 10.0,            # block capacitances
-    #     'alpha': jnp.ones((N,)) * 0.75,             # fractional factors
-    #     'fs':    float(sampling_frequency),
-    # }
-    params = {'R': jnp.array([3e-3, 5e-3, 1e-2]), 'Rs':jnp.array(3e-3), 'alpha':jnp.array([.75, .75, .75]), 'C':jnp.log(jnp.array([10., 100., 1000.]))}
-
+    params = {
+        'Rs':    jnp.array(3e-3),                   # initial supply resistance
+        'R':     jnp.ones((N,)) * 1e-2 *N,             # block resistances
+        # 'C':     jnp.log(jnp.ones((N,)) * 100 * N), 
+        'C':     jnp.log(jnp.array([10.,100.,1000,500.,500.,500.])[:N]) ,            # block capacitances
+        'alpha': jnp.ones((N,)) * 0.75,             # fractional factors
+    }
 
     # run training
-    trained_params, losses = train_loop(params, I, U, num_steps=iters, lr=1e-3, fs=fs)
+    trained_params, losses = train_loop(params, I, U, num_steps=iters, fs=fs)
 
     # final simulation
     y_pred = sim_z(I=I,fs=fs, **trained_params)
@@ -133,13 +154,14 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
         "freq":freq,
         "debug":debug,
         "sampling_frequency": sampling_frequency,
+        "params": params
     }
 
     # compute metrics
     rmse  = run_model.root_mean_squared_error(U, y_pred)
     cae   = run_model.cumulative_absolute_error(U, y_pred)
     print(f"\nTrained params: {trained_params}")
-    print(f"Final RMSE: {rmse:.4f},   CAE: {cae:.4f}")
+    print(f"Final RMSE: {rmse:.4e},   CAE: {cae:.4f}")
 
 
     # --- plot loss curve ---
