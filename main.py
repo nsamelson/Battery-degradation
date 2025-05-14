@@ -28,18 +28,28 @@ def sim_z(Rs, R, C, alpha,fs, I):
 def compute_loss(params, y, U, fs):
     y_pred = sim_z(I=y,fs=fs, **params)
     loss = jnp.sum(optax.squared_error(y_pred, U))
+    # loss = jnp.sum(jnp.abs(y_pred - U))
     return loss
 
-def make_optimizer(params, lr_res=1e-3, lr_alpha=1e-4, lr_cap=1e-2):
-    res_optim   = optax.adam(learning_rate=lr_res)
-    alpha_optim = optax.adam(learning_rate=lr_alpha)
-    cap_optim   = optax.adam(learning_rate=lr_cap)
+
+
+def make_optimizer(params, lr_res=1e-3, lr_alpha=1e-3, lr_cap=1e-2):
+    warmup = 40
+    decay = 500
+    
+    res_optim   = optax.adamw(learning_rate=optax.warmup_cosine_decay_schedule(0.,lr_res,warmup,decay,lr_res*0.1),
+                                weight_decay=1e-4)
+    alpha_optim = optax.adamw(learning_rate=optax.warmup_cosine_decay_schedule(0.,lr_alpha,warmup,decay,lr_alpha*0.1),
+                                weight_decay=1e-4)
+    cap_optim   = optax.adamw(learning_rate=optax.warmup_cosine_decay_schedule(0.,lr_cap,warmup,decay,lr_cap*0.1),
+                                weight_decay=1e-4)
 
     res_mask   = {k: (k == 'Rs' or k == 'R')   for k in params}
     alpha_mask = {k: (k == 'alpha')            for k in params}
     cap_mask   = {k: (k == 'C' or k == 'Q')    for k in params}
 
     optimizer = optax.chain(
+        optax.clip_by_global_norm(1.0),   
         optax.masked(res_optim,   res_mask),
         optax.masked(alpha_optim, alpha_mask),
         optax.masked(cap_optim,   cap_mask),
@@ -47,31 +57,49 @@ def make_optimizer(params, lr_res=1e-3, lr_alpha=1e-4, lr_cap=1e-2):
 
     return optimizer
 
+def data_stream(I, U, batch_size):
+    for i in range(0, len(I), batch_size):
+        yield I[i:i+batch_size], U[i:i+batch_size]
 
-def step(params, opt_state, I, U, optimizer, fs):
-    loss, grads = jax.value_and_grad(compute_loss)(params, I, U, fs)
-    updates, opt_state = optimizer.update(grads, opt_state)
-    params = optax.apply_updates(params, updates)
+def step(params, opt_state, I, U, optimizer, fs, minibatch=True, batch_size=2000):
+    if minibatch:
+        # rng, key = jax.random.split(rng)
+        batches = data_stream(I, U, batch_size)
+    else:
+        batches = [(I, U)] 
 
-    # Clip to pre-defined ranges
-    params['R']   = jnp.clip(params['R'],       a_min=1e-5, a_max=100.0)
-    params['Rs']  = jnp.clip(params['Rs'],      a_min=1e-5, a_max=100.0)
-    params['alpha'] = jnp.clip(params['alpha'], a_min=0.6, a_max=1.0)
-    params['C'] = jnp.clip(params['C'],         a_min=1.0, a_max=4.0)
-    return params, opt_state, loss
+    tot_loss = 0
+
+    for I_batch, U_batch in batches:
+
+        loss, grads = jax.value_and_grad(compute_loss)(params, I_batch, U_batch, fs)
+        updates, opt_state = optimizer.update(grads, opt_state, params)
+        params = optax.apply_updates(params, updates)
+
+        tot_loss += loss
+
+        # Clip to pre-defined ranges
+        params['R']   = jnp.clip(params['R'],       a_min=1e-5, a_max=100.0)
+        params['Rs']  = jnp.clip(params['Rs'],      a_min=1e-5, a_max=100.0)
+        params['alpha'] = jnp.clip(params['alpha'], a_min=0.6, a_max=1.0)
+        params['C'] = jnp.clip(params['C'],         a_min=1.0, a_max=4.0)
+    
+    return params, opt_state, tot_loss
+
+
 
 def train_loop(params, I, y_true, fs, num_steps=1000):
     optimizer = make_optimizer(params)
     opt_state = optimizer.init(params)
 
-    early_stopper = EarlyStopping(patience=25, min_delta=1e-5)
-
     losses = []
+    early_stopper = EarlyStopping(patience=40, min_delta=5e-6)
     pbar = tqdm(range(num_steps), desc="Training")
+
     for _ in pbar:
-        params, opt_state, loss = step(params, opt_state, I, y_true, optimizer, fs)
-        
+        params, opt_state, loss = step(params, opt_state, I, y_true, optimizer, fs)        
         losses.append(loss.item())
+
         pbar.set_description(
             f"Loss={loss:.4e}, Rs={params['Rs']:.4f}, R={[f'{r:.4f}' for r in params['R'].tolist()]}, "
             f"C={[f'{c:.4f}' for c in params['C'].tolist()]}, "
@@ -114,7 +142,7 @@ def correct_signal(orig_signal):
 def main(model_name, N, iters, freq, debug, sampling_frequency):
     work_dir = os.getcwd()
     key = 42
-    el = 2000
+    el = 6000
     rng = jax.random.PRNGKey(key)
 
     # get data
@@ -135,11 +163,18 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
     # init parameters
     params = {
         'Rs':    jnp.array(3e-3),                   # initial supply resistance
-        'R':     jnp.ones((N,)) * 1e-2 *N,             # block resistances
+        'R':     jnp.ones((N,)) * 5e-2 ,             # block resistances
         # 'C':     jnp.log(jnp.ones((N,)) * 100 * N), 
         'C':     jnp.log(jnp.array([10.,100.,1000,500.,500.,500.])[:N]) ,            # block capacitances
         'alpha': jnp.ones((N,)) * 0.75,             # fractional factors
     }
+    # params = {
+    #     'Rs':    jnp.array(10.0),                   # initial supply resistance
+    #     'R':     jnp.ones((N,)) * 10.,             # block resistances
+    #     # 'C':     jnp.log(jnp.ones((N,)) * 100 * N), 
+    #     'C':     jnp.log(jnp.array([100.,1.,10.,500.,500.,500.])[:N]) ,            # block capacitances
+    #     'alpha': jnp.ones((N,)) * 0.80,             # fractional factors
+    # }
 
     # run training
     trained_params, losses = train_loop(params, I, U, num_steps=iters, fs=fs)
@@ -186,6 +221,7 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
     plt.legend()
     plt.tight_layout()
     plt.savefig("plots/signals.png")
+    plt.close()
 
 
 
