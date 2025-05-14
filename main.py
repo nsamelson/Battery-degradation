@@ -35,7 +35,7 @@ def compute_loss(params, y, U, fs):
 
 def make_optimizer(params, lr_res=1e-3, lr_alpha=1e-3, lr_cap=1e-2):
     warmup = 40
-    decay = 500
+    decay = 200
     
     res_optim   = optax.adamw(learning_rate=optax.warmup_cosine_decay_schedule(0.,lr_res,warmup,decay,lr_res*0.1),
                                 weight_decay=1e-4)
