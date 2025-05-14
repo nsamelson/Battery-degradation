@@ -18,7 +18,6 @@ from tqdm import tqdm
 
 @jax.jit
 def sim_z(Rs, R, C, alpha,fs, I):
-    # print(Rs, R, C, alpha, fs, I, init)
     A, bl, m, d, T_end = state_space_sim.jgen(Rs,R,jnp.exp(C),alpha,fs,len(I))
     mask = state_space_sim.generate_mask(A.shape)
     x_init = np.zeros(A.shape)
@@ -30,7 +29,6 @@ def compute_loss(params, y, U, fs):
     loss = jnp.sum(optax.squared_error(y_pred, U))
     # loss = jnp.sum(jnp.abs(y_pred - U))
     return loss
-
 
 
 def make_optimizer(params, lr_res=1e-3, lr_alpha=1e-3, lr_cap=1e-2):
@@ -57,61 +55,67 @@ def make_optimizer(params, lr_res=1e-3, lr_alpha=1e-3, lr_cap=1e-2):
 
     return optimizer
 
-def data_stream(I, U, batch_size):
-    for i in range(0, len(I), batch_size):
-        yield I[i:i+batch_size], U[i:i+batch_size]
+def data_stream(signals, batch_size):
+    for i in range(0, len(signals[0]), batch_size):
+        yield (signals[j][i:i+batch_size] for j in range(len(signals)))
 
-def step(params, opt_state, I, U, optimizer, fs, minibatch=True, batch_size=2000):
+def step(params, opt_state, I, U_train, U_val, optimizer, fs, minibatch=True):
+
     if minibatch:
-        # rng, key = jax.random.split(rng)
-        batches = data_stream(I, U, batch_size)
+        batches = data_stream([I, U_train], 2000)
     else:
-        batches = [(I, U)] 
+        batches = [(I, U_train)] 
 
     tot_loss = 0
-
     for I_batch, U_batch in batches:
-
+        # still differentiate w.r.t. params
         loss, grads = jax.value_and_grad(compute_loss)(params, I_batch, U_batch, fs)
         updates, opt_state = optimizer.update(grads, opt_state, params)
         params = optax.apply_updates(params, updates)
 
         tot_loss += loss
 
-        # Clip to pre-defined ranges
-        params['R']   = jnp.clip(params['R'],       a_min=1e-5, a_max=100.0)
-        params['Rs']  = jnp.clip(params['Rs'],      a_min=1e-5, a_max=100.0)
-        params['alpha'] = jnp.clip(params['alpha'], a_min=0.6, a_max=1.0)
-        params['C'] = jnp.clip(params['C'],         a_min=1.0, a_max=4.0)
-    
-    return params, opt_state, tot_loss
+        # Clip parameters
+        params['R']     = jnp.clip(params['R'],     a_min=1e-5, a_max=100.0)
+        params['Rs']    = jnp.clip(params['Rs'],    a_min=1e-5, a_max=100.0)
+        params['alpha'] = jnp.clip(params['alpha'], a_min=0.6,  a_max=1.0)
+        params['C']     = jnp.clip(params['C'],     a_min=1.0,  a_max=4.0)
+
+    # Simulate once for full val loss
+    y_pred_val = sim_z(I=I, fs=fs, **params)
+    val_loss = jnp.sum(optax.squared_error(y_pred_val, U_val))
+
+    return params, opt_state, tot_loss, val_loss
 
 
 
-def train_loop(params, I, y_true, fs, num_steps=1000):
+def train_loop(params, I, U_train, U_val, fs, num_steps=1000):
     optimizer = make_optimizer(params)
     opt_state = optimizer.init(params)
 
     losses = []
-    early_stopper = EarlyStopping(patience=40, min_delta=5e-6)
+    val_losses = []
+    early_stopper = EarlyStopping(patience=30, min_delta=1e-4)
     pbar = tqdm(range(num_steps), desc="Training")
 
     for _ in pbar:
-        params, opt_state, loss = step(params, opt_state, I, y_true, optimizer, fs)        
+        params, opt_state, loss, val_loss = step(params, opt_state, I, U_train, U_val, optimizer, fs)        
         losses.append(loss.item())
+        val_losses.append(val_loss.item())
 
         pbar.set_description(
-            f"Loss={loss:.4e}, Rs={params['Rs']:.4f}, R={[f'{r:.4f}' for r in params['R'].tolist()]}, "
+            f"Train loss={loss:.4e}, val loss={val_loss:.4e}, Rs={params['Rs']:.4f},"
+            f"R={[f'{r:.4f}' for r in params['R'].tolist()]}, "
             f"C={[f'{c:.4f}' for c in params['C'].tolist()]}, "
             f"a={[f'{a:.4f}' for a in params['alpha'].tolist()]}"
         )
         # Early stop
-        early_stopper(loss.item())
+        early_stopper(val_loss.item())
         if early_stopper.should_stop:
             print(f"Early stopping triggered after {early_stopper.patience} epochs without improvement.")
             break
             
-    return params, losses
+    return params, losses, val_losses
 
 
 def load_data(path, freq):
@@ -142,7 +146,7 @@ def correct_signal(orig_signal):
 def main(model_name, N, iters, freq, debug, sampling_frequency):
     work_dir = os.getcwd()
     key = 42
-    el = 6000
+    el = 4000
     rng = jax.random.PRNGKey(key)
 
     # get data
@@ -151,33 +155,29 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
 
     # decimate and correct offset
     I = correct_signal(decimate_signal(data["I"],fs,sampling_frequency))
-    U = decimate_signal(data["U1"],fs,sampling_frequency)
+    U_train = decimate_signal(data["U1"],fs,sampling_frequency)
+    U_val = decimate_signal(data["U2"],fs,sampling_frequency)
 
     if debug:
-        U= U[:el]
+        U_train= U_train[:el]
+        U_val= U_val[:el]
         I= I[:el]
 
     I -= jnp.mean(I)
-    U -= jnp.mean(U)
+    U_train -= jnp.mean(U_train)
+    U_val -= jnp.mean(U_val)
 
     # init parameters
     params = {
         'Rs':    jnp.array(3e-3),                   # initial supply resistance
         'R':     jnp.ones((N,)) * 5e-2 ,             # block resistances
-        # 'C':     jnp.log(jnp.ones((N,)) * 100 * N), 
+        # 'C':     jnp.log(jnp.ones((N,)) * 100), 
         'C':     jnp.log(jnp.array([10.,100.,1000,500.,500.,500.])[:N]) ,            # block capacitances
         'alpha': jnp.ones((N,)) * 0.75,             # fractional factors
     }
-    # params = {
-    #     'Rs':    jnp.array(10.0),                   # initial supply resistance
-    #     'R':     jnp.ones((N,)) * 10.,             # block resistances
-    #     # 'C':     jnp.log(jnp.ones((N,)) * 100 * N), 
-    #     'C':     jnp.log(jnp.array([100.,1.,10.,500.,500.,500.])[:N]) ,            # block capacitances
-    #     'alpha': jnp.ones((N,)) * 0.80,             # fractional factors
-    # }
 
     # run training
-    trained_params, losses = train_loop(params, I, U, num_steps=iters, fs=fs)
+    trained_params, losses, val_losses = train_loop(params, I, U_train, U_val, num_steps=iters, fs=fs)
 
     # final simulation
     y_pred = sim_z(I=I,fs=fs, **trained_params)
@@ -193,8 +193,8 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
     }
 
     # compute metrics
-    rmse  = run_model.root_mean_squared_error(U, y_pred)
-    cae   = run_model.cumulative_absolute_error(U, y_pred)
+    rmse  = run_model.root_mean_squared_error(U_val, y_pred)
+    cae   = run_model.cumulative_absolute_error(U_val, y_pred)
     print(f"\nTrained params: {trained_params}")
     print(f"Final RMSE: {rmse:.4e},   CAE: {cae:.4f}")
 
@@ -202,6 +202,7 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
     # --- plot loss curve ---
     plt.figure(figsize=(6,4))
     plt.plot(losses, label="training loss")
+    plt.plot(val_losses, label="validation loss")
     # plt.yscale('log')
     plt.xlabel("Step")
     plt.ylabel("Squared–Error Loss")
@@ -212,9 +213,9 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
 
     # --- plot signals ---
     plt.figure(figsize=(8,6))
-    plt.plot(U, label="true", linewidth=2)
+    plt.plot(U_train, label="true", linewidth=2)
     plt.plot(y_pred, label="pred", linestyle='--')
-    plt.xlim(0,min(el, len(U)))
+    plt.xlim(0,min(el, len(U_train)))
     plt.xlabel("Timestep")
     plt.ylabel("Voltage")
     plt.title(f"Simulated vs True (N={N})")
