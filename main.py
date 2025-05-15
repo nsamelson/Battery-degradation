@@ -127,7 +127,7 @@ def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,):
             avg_val_losses.append(avg_val_loss.item())
 
         # Early stop
-        early_stopper(loss.item())
+        early_stopper(loss.item(), params)
         if early_stopper.should_stop:
             print(f"Early stopping triggered after {early_stopper.patience} epochs without improvement.")
             break
@@ -139,7 +139,7 @@ def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,):
             f"a={[f'{a:.4f}' for a in params['alpha'].tolist()]}"
         )
             
-    return params, losses, avg_val_losses
+    return early_stopper.best_params, losses, avg_val_losses
 
 
 def load_data(path, freq):
@@ -212,23 +212,21 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
 
         # compute metrics
         y_pred = sim_z(I=I,fs=fs, **trained_params)
-        rmse  = run_model.root_mean_squared_error(U_train, y_pred)
-        cae   = run_model.cumulative_absolute_error(U_train, y_pred)
-        bic = run_model.compute_bic(len(U_train),rmse,3*N+1)
+        best_loss = jnp.sum(optax.squared_error(y_pred, U_train))
+        bic = run_model.compute_bic(len(U_train),best_loss,3*N+1)
 
         history[cell] = {
             "losses": losses,
             "best_params": trained_params,
-            "rmse": rmse,
-            "cae": cae,
+            "best_loss": best_loss,
             "bic": bic
         }
 
         if cell == "U1":
-            history["avg_val_losses"] = avg_val_losses
-            history["avg_val_rmse"] = np.mean(np.array([run_model.root_mean_squared_error(U_cell, y_pred) for U_cell in U_val]))
-            history["avg_val_cae"] = np.mean(np.array([run_model.cumulative_absolute_error(U_cell, y_pred) for U_cell in U_val]))
-            history["avg_val_bic"] = run_model.compute_bic(len(U_train),history["avg_val_rmse"],3*N+1)
+            history["avg_losses"] = avg_val_losses
+            history["avg_best_loss"] = jnp.mean(jnp.array([jnp.sum(optax.squared_error(y_pred, U_cell)) for U_cell in U_val]))
+            history["avg_bic"] = run_model.compute_bic(len(U_train),history["avg_best_loss"],3*N+1)
+            history["avg_aic"] = run_model.compute_aic(len(U_train),history["avg_best_loss"],3*N+1)
 
 
     history["config"]= {
@@ -238,7 +236,8 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
         "freq":freq,
         "debug":debug,
         "sampling_frequency": sampling_frequency,
-        "init_params": params
+        "init_params": params,
+        "fs": fs
     }
 
     # save history
@@ -247,6 +246,8 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
 
     with open(f"{dir_path}/history.json", "w") as outfile: 
         json.dump(clean_for_json(history), outfile)
+    
+    print(f"Saved history of training into {dir_path}/history.json")
 
     # compute metrics
     
