@@ -17,6 +17,21 @@ import scipy.signal as signal
 from tqdm import tqdm
 
 
+def clean_for_json(obj):
+
+    if isinstance(obj, dict):
+        return {k: clean_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_for_json(v) for v in obj]
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, jnp.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, np.generic):  # catches all np.float32, np.int64, etc.
+        return obj.item()
+    else:
+        return obj
+
 @jax.jit
 def sim_z(Rs, R, C, alpha,fs, I):
     A, bl, m, d, T_end = state_space_sim.jgen(Rs,R,jnp.exp(C),alpha,fs,len(I))
@@ -60,7 +75,7 @@ def data_stream(signals, batch_size):
     for i in range(0, len(signals[0]), batch_size):
         yield (signals[j][i:i+batch_size] for j in range(len(signals)))
 
-def step(params, opt_state, I, U_train, U_val, optimizer, fs, minibatch=True, train_cell="U1"):
+def step(params, opt_state, I, U_train, optimizer, fs, minibatch=True, U_val = None):
 
     if minibatch:
         batches = data_stream([I, U_train], 2000)
@@ -85,7 +100,7 @@ def step(params, opt_state, I, U_train, U_val, optimizer, fs, minibatch=True, tr
 
     
     # Simulate once for full val loss
-    if train_cell == "U1":
+    if U_val:
         y_pred_val = sim_z(I=I, fs=fs, **params)
 
         val_losses = [jnp.sum(optax.squared_error(y_pred_val, U_cell_val)) for U_cell_val in U_val]
@@ -95,7 +110,7 @@ def step(params, opt_state, I, U_train, U_val, optimizer, fs, minibatch=True, tr
 
 
 
-def train_loop(params, I, U_train, U_val, fs, num_steps=1000, train_cell="U1"):
+def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,):
     optimizer = make_optimizer(params)
     opt_state = optimizer.init(params)
 
@@ -105,9 +120,11 @@ def train_loop(params, I, U_train, U_val, fs, num_steps=1000, train_cell="U1"):
     pbar = tqdm(range(num_steps), desc="Training")
 
     for _ in pbar:
-        params, opt_state, loss, avg_val_loss = step(params, opt_state, I, U_train, U_val, optimizer, fs, train_cell)        
+        params, opt_state, loss, avg_val_loss = step(params, opt_state, I, U_train, optimizer, fs, U_val=U_val)        
         losses.append(loss.item())
-        avg_val_losses.append(avg_val_loss.item())
+
+        if U_val:
+            avg_val_losses.append(avg_val_loss.item())
 
         # Early stop
         early_stopper(loss.item())
@@ -185,11 +202,13 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
 
     # run training for each cell
     for i in range(len(U_cells)):
-        U_train = U_cells[i]
-        U_val = U_cells[:i] + U_cells[i+1:]
         cell = cells[i]
 
-        trained_params, losses, avg_val_losses = train_loop(params, I, U_train, U_val, num_steps=iters, fs=fs, train_cell=cell)
+        # setup U_val as all U cells except U1, when U_train is U_1 only
+        U_train = U_cells[i]
+        U_val = U_cells[:i] + U_cells[i+1:] if cell == "U1" else None
+
+        trained_params, losses, avg_val_losses = train_loop(params, I, U_train, fs, U_val, num_steps=iters,)
 
         # compute metrics
         y_pred = sim_z(I=I,fs=fs, **trained_params)
@@ -210,23 +229,29 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
             history["avg_val_rmse"] = np.mean(np.array([run_model.root_mean_squared_error(U_cell, y_pred) for U_cell in U_val]))
             history["avg_val_cae"] = np.mean(np.array([run_model.cumulative_absolute_error(U_cell, y_pred) for U_cell in U_val]))
             history["avg_val_bic"] = run_model.compute_bic(len(U_train),history["avg_val_rmse"],3*N+1)
-    
-    print(history.keys())    
 
-    config = {
+
+    history["config"]= {
         "model_name": model_name,
         "path": os.path.join(work_dir, "data"),
         "seed_value": key,
         "freq":freq,
         "debug":debug,
         "sampling_frequency": sampling_frequency,
-        "params": params
+        "init_params": params
     }
+
+    # save history
+    dir_path = os.path.join(work_dir,"output",model_name)
+    os.makedirs(dir_path, exist_ok=True)
+
+    with open(f"{dir_path}/history.json", "w") as outfile: 
+        json.dump(clean_for_json(history), outfile)
 
     # compute metrics
     
-    print(f"\nTrained params: {trained_params}")
-    print(f"Final RMSE: {rmse:.4e},   CAE: {cae:.4f}")
+    # print(f"\nTrained params: {trained_params}")
+    # print(f"Final RMSE: {rmse:.4e},   CAE: {cae:.4f}")
 
 
     # --- plot loss curve ---
