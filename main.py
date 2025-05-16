@@ -51,7 +51,7 @@ def compute_loss(params, y, U, fs):
     return loss
 
 
-def make_optimizer(params, lr_res=1e-3, lr_alpha=1e-3, lr_cap=1e-2):
+def make_optimizer(params, lr_res=1e-2, lr_alpha=5e-4, lr_cap=1e-2):
     warmup = 40
     decay = 200
     
@@ -118,7 +118,7 @@ def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,):
 
     losses = []
     avg_val_losses = []
-    early_stopper = EarlyStopping(patience=30, min_delta=1e-4)
+    early_stopper = EarlyStopping(patience=30, min_delta=5e-4)
     pbar = tqdm(range(num_steps), desc="Training")
 
     for _ in pbar:
@@ -192,7 +192,7 @@ def sample_params(key, N):
 def main(model_name, N, iters, freq, debug, sampling_frequency):
     work_dir = os.getcwd()
     el = 2000
-    cells = ["U1","U2","U3","U4","U5","U6"]
+    cells = ["U1","U2"]#,"U3","U4","U5","U6"]
     n_seeds = 5
 
     # get data
@@ -251,8 +251,8 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
 
             # Pilot run
             pilot_loss = compute_loss(p, I, U_train, fs)
-            if pilot_loss > best_seed_loss * 100:
-                print(f"Seed {s} is worse than best seed loss by 100 times {pilot_loss} vs {best_seed_loss}, skipping.")
+            if pilot_loss > best_seed_loss * 500:
+                print(f"Seed {s} is worse than best seed loss by {pilot_loss // best_seed_loss} times: {pilot_loss:.4f} vs {best_seed_loss:.4f}, skipping.")
                 bad_seeds.add(s)
                 continue
 
@@ -264,8 +264,8 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
             loss = jnp.mean(optax.squared_error(y_pred, U_train))
 
             # skip seeds if loss is 10* larger than the best loss
-            if loss > best_seed_loss * 10:
-                print(f"Seed {s} is worse than best seed loss by 10 times, skipping.")
+            if loss > best_seed_loss * 50:
+                print(f"Seed {s} is worse than best seed loss by {loss // best_seed_loss} times, {loss:.4f} vs {best_seed_loss:.4f}, skipping.")
                 bad_seeds.add(s)
                 continue
 
@@ -273,8 +273,9 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
                 best_seed_loss = loss
                 best_seed_params = trained_params
                 best_seed_losses = losses
-                best_seed_val_losses = avg_val_losses
                 best_seed = s
+                if cell == "U1":
+                    best_seed_val_losses = avg_val_losses
 
         bic = run_model.compute_bic(len(U_train),best_seed_loss,3*N+1)
 
@@ -322,23 +323,23 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
     # --- plot loss curve ---
     plt.figure(figsize=(6,4))
     plt.plot(best_seed_losses, label="training loss")
-    plt.plot(avg_val_losses, label="validation loss")
+    plt.plot(history["avg_losses"], label="avg loss (all cells)")
     # plt.yscale('log')
     plt.xlabel("Step")
-    plt.ylabel("Squared–Error Loss")
-    plt.title(f"Training Loss (N={N})")
+    plt.ylabel("MSE Loss")
+    plt.title(f"Training Loss (N={N} blocks)")
     plt.legend()
     plt.tight_layout()
     plt.savefig("plots/loss.png")
 
     # --- plot signals ---
     plt.figure(figsize=(8,6))
-    plt.plot(U_cells[0], label="true", linewidth=2)
-    plt.plot(best_y_pred, label="pred", linestyle='--')
+    plt.plot(U_cells[0], label="true")
+    plt.plot(best_y_pred, label="pred")
     plt.xlim(0,min(el, len(U_train)))
     plt.xlabel("Timestep")
     plt.ylabel("Voltage")
-    plt.title(f"Simulated vs True (N={N})")
+    plt.title(f"Simulated vs True (N={N} blocks)")
     plt.legend()
     plt.tight_layout()
     plt.savefig("plots/signals.png")
