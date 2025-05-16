@@ -16,6 +16,7 @@ import h5py
 import scipy.signal as signal
 from tqdm import tqdm
 
+# jax.config.update("jax_debug_nans", True)
 
 def clean_for_json(obj):
 
@@ -42,8 +43,11 @@ def sim_z(Rs, R, C, alpha,fs, I):
 @jax.jit
 def compute_loss(params, y, U, fs):
     y_pred = sim_z(I=y,fs=fs, **params)
-    loss = jnp.sum(optax.squared_error(y_pred, U))
+    # loss = jnp.sum(optax.squared_error(y_pred, U))
     # loss = jnp.sum(jnp.abs(y_pred - U))
+    # loss = jnp.mean(jnp.abs(y_pred - U))
+    loss = jnp.mean(optax.squared_error(y_pred, U))
+
     return loss
 
 
@@ -68,6 +72,7 @@ def make_optimizer(params, lr_res=1e-3, lr_alpha=1e-3, lr_cap=1e-2):
         optax.masked(alpha_optim, alpha_mask),
         optax.masked(cap_optim,   cap_mask),
     )
+    # optimizer = optax.apply_if_finite(optimizer, max_consecutive_errors=1)
 
     return optimizer
 
@@ -77,10 +82,8 @@ def data_stream(signals, batch_size):
 
 def step(params, opt_state, I, U_train, optimizer, fs, minibatch=True, U_val = None):
 
-    if minibatch:
-        batches = data_stream([I, U_train], 2000)
-    else:
-        batches = [(I, U_train)] 
+    # setup batches
+    batches = data_stream([I, U_train], 2000) if minibatch else [(I, U_train)]
 
     tot_loss = 0.
     avg_val_loss = 0.
@@ -93,8 +96,8 @@ def step(params, opt_state, I, U_train, optimizer, fs, minibatch=True, U_val = N
         tot_loss += loss
 
         # Clip parameters
-        params['R']     = jnp.clip(params['R'],     a_min=1e-5, a_max=100.0)
-        params['Rs']    = jnp.clip(params['Rs'],    a_min=1e-5, a_max=100.0)
+        params['R']     = jnp.clip(params['R'],     a_min=-5., a_max=2.0)
+        params['Rs']    = jnp.clip(params['Rs'],    a_min=-5., a_max=2.0)
         params['alpha'] = jnp.clip(params['alpha'], a_min=0.6,  a_max=1.0)
         params['C']     = jnp.clip(params['C'],     a_min=1.0,  a_max=4.0)
 
@@ -103,11 +106,10 @@ def step(params, opt_state, I, U_train, optimizer, fs, minibatch=True, U_val = N
     if U_val:
         y_pred_val = sim_z(I=I, fs=fs, **params)
 
-        val_losses = [jnp.sum(optax.squared_error(y_pred_val, U_cell_val)) for U_cell_val in U_val]
+        val_losses = [jnp.mean(optax.squared_error(y_pred_val, U_cell_val)) for U_cell_val in U_val]
         avg_val_loss = jnp.mean(jnp.array(val_losses))
 
     return params, opt_state, tot_loss, avg_val_loss
-
 
 
 def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,):
@@ -116,14 +118,19 @@ def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,):
 
     losses = []
     avg_val_losses = []
-    early_stopper = EarlyStopping(patience=30, min_delta=1e-5)
+    early_stopper = EarlyStopping(patience=30, min_delta=1e-4)
     pbar = tqdm(range(num_steps), desc="Training")
 
     for _ in pbar:
-        params, opt_state, loss, avg_val_loss = step(params, opt_state, I, U_train, optimizer, fs, U_val=U_val)        
+        params, opt_state, loss, avg_val_loss = step(params, opt_state, I, U_train, optimizer, fs, U_val=U_val)   
+
+        if not jnp.isfinite(loss):
+            print("Loss is NaN or Inf — stopping...")
+            break
+
         losses.append(loss.item())
 
-        if U_val:
+        if U_val and avg_val_loss:
             avg_val_losses.append(avg_val_loss.item())
 
         # Early stop
@@ -133,8 +140,8 @@ def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,):
             break
 
         pbar.set_description(
-            f"Train loss={loss:.4e}, Rs={10**params['Rs']:.4f},"
-            f"R={[f'{10**r:.4f}' for r in params['R'].tolist()]}, "
+            f"Train loss={loss:.4e}, Rs={10**params['Rs']:.5f},"
+            f"R={[f'{10**r:.5f}' for r in params['R'].tolist()]}, "
             f"C={[f'{10**c:.2f}' for c in params['C'].tolist()]}, "
             f"a={[f'{a:.4f}' for a in params['alpha'].tolist()]}"
         )
@@ -172,7 +179,7 @@ def sample_params(key, N):
 
     Rs = jax.random.uniform(keys[0], (), minval=-5, maxval=2)
     R = jax.random.uniform(keys[1], (N,), minval=-5, maxval=2)
-    alpha = jax.random.uniform(keys[2], (N,), minval=0.6, maxval=1.0)
+    alpha = jax.random.uniform(keys[2], (N,), minval=0.65, maxval=1.0)
     C = jax.random.uniform(keys[3], (N,), minval=1.0, maxval=4.0)
 
     return {
@@ -186,7 +193,7 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
     work_dir = os.getcwd()
     el = 2000
     cells = ["U1","U2","U3","U4","U5","U6"]
-    n_seeds = 4
+    n_seeds = 5
 
     # get data
     data = load_data(os.path.join(work_dir, "data"), freq)
@@ -204,19 +211,25 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
     I -= jnp.mean(I)
     U_cells = [cell - jnp.mean(cell) for cell in U_cells]
 
+    # scale up
+    I *= 200
+    U_cells = [cell* 200 for cell in U_cells]
+
     # init parameters
     params = {
-        'Rs':    jnp.array(3e-3),                   # initial supply resistance
-        'R':     jnp.ones((N,)) * 5e-2 ,             # block resistances
+        'Rs':    jnp.array(jnp.log10(3e-3)),                   # initial supply resistance
+        'R':     jnp.ones((N,)) * jnp.log10(5e-2) ,             # block resistances
         'C':     jnp.log(jnp.array([10.,100.,1000,500.,500.,500.])[:N]) ,            # block capacitances
         'alpha': jnp.ones((N,)) * 0.75,             # fractional factors
     }
 
+    bad_seeds = set()
     history = {}
 
     # run training for each cell
     for i in range(len(U_cells)):
         cell = cells[i]
+        print(f"Training on cell {cell}...")
 
         # setup U_val as all U cells except U1, when U_train is U_1 only
         U_train = U_cells[i]
@@ -230,18 +243,31 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
         best_seed = 0
 
         for s in range(n_seeds + 1):
-            rng_key = jax.random.PRNGKey(s)
-            if s == 0:
-                p = params  # Use your manual params for seed 0
-            else:
-                p = sample_params(key=rng_key, N=N)
-            print(p)
+            if s in bad_seeds:
+                continue
 
+            rng_key = jax.random.PRNGKey(s)
+            p = params if s==0 else sample_params(key=rng_key, N=N)
+
+            # Pilot run
+            pilot_loss = compute_loss(p, I, U_train, fs)
+            if pilot_loss > best_seed_loss * 100:
+                print(f"Seed {s} is worse than best seed loss by 100 times {pilot_loss} vs {best_seed_loss}, skipping.")
+                bad_seeds.add(s)
+                continue
+
+            # full run
             trained_params, losses, avg_val_losses = train_loop(p, I, U_train, fs, U_val, num_steps=iters,)
 
             # compute metrics
             y_pred = sim_z(I=I,fs=fs, **trained_params)
-            loss = jnp.sum(optax.squared_error(y_pred, U_train))
+            loss = jnp.mean(optax.squared_error(y_pred, U_train))
+
+            # skip seeds if loss is 10* larger than the best loss
+            if loss > best_seed_loss * 10:
+                print(f"Seed {s} is worse than best seed loss by 10 times, skipping.")
+                bad_seeds.add(s)
+                continue
 
             if loss < best_seed_loss:
                 best_seed_loss = loss
@@ -290,10 +316,12 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
     # print(f"\nTrained params: {trained_params}")
     # print(f"Final RMSE: {rmse:.4e},   CAE: {cae:.4f}")
 
+    best_y_pred = sim_z(I=I,fs=fs, **best_seed_params)
+
 
     # --- plot loss curve ---
     plt.figure(figsize=(6,4))
-    plt.plot(losses, label="training loss")
+    plt.plot(best_seed_losses, label="training loss")
     plt.plot(avg_val_losses, label="validation loss")
     # plt.yscale('log')
     plt.xlabel("Step")
@@ -305,8 +333,8 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
 
     # --- plot signals ---
     plt.figure(figsize=(8,6))
-    plt.plot(U_train, label="true", linewidth=2)
-    plt.plot(y_pred, label="pred", linestyle='--')
+    plt.plot(U_cells[0], label="true", linewidth=2)
+    plt.plot(best_y_pred, label="pred", linestyle='--')
     plt.xlim(0,min(el, len(U_train)))
     plt.xlabel("Timestep")
     plt.ylabel("Voltage")
