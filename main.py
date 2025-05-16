@@ -34,7 +34,7 @@ def clean_for_json(obj):
 
 @jax.jit
 def sim_z(Rs, R, C, alpha,fs, I):
-    A, bl, m, d, T_end = state_space_sim.jgen(Rs,R,jnp.exp(C),alpha,fs,len(I))
+    A, bl, m, d, T_end = state_space_sim.jgen(10**Rs,10**R,10**C,alpha,fs,len(I))
     mask = state_space_sim.generate_mask(A.shape)
     x_init = np.zeros(A.shape)
     return state_space_sim.forward_sim(A, bl, m, d, jnp.array(x_init), I, mask)
@@ -129,13 +129,13 @@ def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,):
         # Early stop
         early_stopper(loss.item(), params)
         if early_stopper.should_stop:
-            print(f"Early stopping triggered after {early_stopper.patience} epochs without improvement.")
+            # print(f"Early stopping triggered after {early_stopper.patience} epochs without improvement.")
             break
 
         pbar.set_description(
-            f"Train loss={loss:.4e}, Rs={params['Rs']:.4f},"
-            f"R={[f'{r:.4f}' for r in params['R'].tolist()]}, "
-            f"C={[f'{c:.4f}' for c in params['C'].tolist()]}, "
+            f"Train loss={loss:.4e}, Rs={10**params['Rs']:.4f},"
+            f"R={[f'{10**r:.4f}' for r in params['R'].tolist()]}, "
+            f"C={[f'{10**c:.2f}' for c in params['C'].tolist()]}, "
             f"a={[f'{a:.4f}' for a in params['alpha'].tolist()]}"
         )
             
@@ -167,12 +167,26 @@ def correct_signal(orig_signal):
     corr_signal = orig_signal*(-1) * 50/.625
     return corr_signal
 
+def sample_params(key, N):
+    keys = jax.random.split(key, 4)
+
+    Rs = jax.random.uniform(keys[0], (), minval=-5, maxval=2)
+    R = jax.random.uniform(keys[1], (N,), minval=-5, maxval=2)
+    alpha = jax.random.uniform(keys[2], (N,), minval=0.6, maxval=1.0)
+    C = jax.random.uniform(keys[3], (N,), minval=1.0, maxval=4.0)
+
+    return {
+        'Rs': Rs,
+        'R': R,
+        'C': C,  # because your model expects log(C)
+        'alpha': alpha
+    }
+
 def main(model_name, N, iters, freq, debug, sampling_frequency):
     work_dir = os.getcwd()
-    key = 42
     el = 2000
-    rng = jax.random.PRNGKey(key)
     cells = ["U1","U2","U3","U4","U5","U6"]
+    n_seeds = 4
 
     # get data
     data = load_data(os.path.join(work_dir, "data"), freq)
@@ -208,22 +222,45 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
         U_train = U_cells[i]
         U_val = U_cells[:i] + U_cells[i+1:] if cell == "U1" else None
 
-        trained_params, losses, avg_val_losses = train_loop(params, I, U_train, fs, U_val, num_steps=iters,)
+        # setup best seed tracking
+        best_seed_loss = float('inf')
+        best_seed_params = None
+        best_seed_losses = []
+        best_seed_val_losses = []
+        best_seed = 0
 
-        # compute metrics
-        y_pred = sim_z(I=I,fs=fs, **trained_params)
-        best_loss = jnp.sum(optax.squared_error(y_pred, U_train))
-        bic = run_model.compute_bic(len(U_train),best_loss,3*N+1)
+        for s in range(n_seeds + 1):
+            rng_key = jax.random.PRNGKey(s)
+            if s == 0:
+                p = params  # Use your manual params for seed 0
+            else:
+                p = sample_params(key=rng_key, N=N)
+            print(p)
+
+            trained_params, losses, avg_val_losses = train_loop(p, I, U_train, fs, U_val, num_steps=iters,)
+
+            # compute metrics
+            y_pred = sim_z(I=I,fs=fs, **trained_params)
+            loss = jnp.sum(optax.squared_error(y_pred, U_train))
+
+            if loss < best_seed_loss:
+                best_seed_loss = loss
+                best_seed_params = trained_params
+                best_seed_losses = losses
+                best_seed_val_losses = avg_val_losses
+                best_seed = s
+
+        bic = run_model.compute_bic(len(U_train),best_seed_loss,3*N+1)
 
         history[cell] = {
-            "losses": losses,
-            "best_params": trained_params,
-            "best_loss": best_loss,
+            "losses": best_seed_losses,
+            "best_params": best_seed_params,
+            "best_loss": best_seed_loss,
             "bic": bic
         }
 
         if cell == "U1":
-            history["avg_losses"] = avg_val_losses
+            history["avg_losses"] = best_seed_val_losses
             history["avg_best_loss"] = jnp.mean(jnp.array([jnp.sum(optax.squared_error(y_pred, U_cell)) for U_cell in U_val]))
             history["avg_bic"] = run_model.compute_bic(len(U_train),history["avg_best_loss"],3*N+1)
             history["avg_aic"] = run_model.compute_aic(len(U_train),history["avg_best_loss"],3*N+1)
@@ -232,11 +269,10 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
     history["config"]= {
         "model_name": model_name,
         "path": os.path.join(work_dir, "data"),
-        "seed_value": key,
+        "best_seed": best_seed,
         "freq":freq,
         "debug":debug,
         "sampling_frequency": sampling_frequency,
-        "init_params": params,
         "fs": fs
     }
 
