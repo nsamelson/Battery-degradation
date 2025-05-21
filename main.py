@@ -112,7 +112,7 @@ def step(params, opt_state, I, U_train, optimizer, fs, minibatch=True, U_val = N
     return params, opt_state, tot_loss, avg_val_loss
 
 
-def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,):
+def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,minibatch=True):
     optimizer = make_optimizer(params)
     opt_state = optimizer.init(params)
 
@@ -122,7 +122,7 @@ def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,):
     pbar = tqdm(range(num_steps), desc="Training")
 
     for _ in pbar:
-        params, opt_state, loss, avg_val_loss = step(params, opt_state, I, U_train, optimizer, fs, U_val=U_val)   
+        params, opt_state, loss, avg_val_loss = step(params, opt_state, I, U_train, optimizer, fs,minibatch, U_val=U_val)   
 
         if not jnp.isfinite(loss):
             print("Loss is NaN or Inf — stopping...")
@@ -189,11 +189,11 @@ def sample_params(key, N):
         'alpha': alpha
     }
 
-def main(model_name, N, iters, freq, debug, sampling_frequency):
+def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds):
     work_dir = os.getcwd()
-    el = 2000
-    cells = ["U1","U2"]#,"U3","U4","U5","U6"]
-    n_seeds = 5
+    el = 4000
+    cells = ["U1","U2","U3","U4","U5","U6"]
+    minibatch = True
 
     # get data
     data = load_data(os.path.join(work_dir, "data"), freq)
@@ -229,6 +229,11 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
     # run training for each cell
     for i in range(len(U_cells)):
         cell = cells[i]
+
+        # skip computing other cells for now
+        if i>=1:
+            continue
+
         print(f"Training on cell {cell}...")
 
         # setup U_val as all U cells except U1, when U_train is U_1 only
@@ -241,6 +246,8 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
         best_seed_losses = []
         best_seed_val_losses = []
         best_seed = 0
+
+        history[cell] = {}
 
         for s in range(n_seeds + 1):
             if s in bad_seeds:
@@ -257,17 +264,25 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
                 continue
 
             # full run
-            trained_params, losses, avg_val_losses = train_loop(p, I, U_train, fs, U_val, num_steps=iters,)
+            trained_params, losses, avg_val_losses = train_loop(p, I, U_train, fs, U_val, num_steps=iters,minibatch=minibatch)
 
             # compute metrics
-            y_pred = sim_z(I=I,fs=fs, **trained_params)
-            loss = jnp.mean(optax.squared_error(y_pred, U_train))
+            # y_pred = sim_z(I=I,fs=fs, **trained_params)
+            # loss = jnp.mean(optax.squared_error(y_pred, U_train))
+            loss = compute_loss(trained_params,I, U_train, fs)
+            print(f"Seed {s}: Last training loss: {losses[-1]}, Loss: {loss}, best seed loss: {best_seed_loss}")
 
             # skip seeds if loss is 10* larger than the best loss
             if loss > best_seed_loss * 50:
                 print(f"Seed {s} is worse than best seed loss by {loss // best_seed_loss} times, {loss:.4f} vs {best_seed_loss:.4f}, skipping.")
                 bad_seeds.add(s)
                 continue
+
+            history[cell]["trainings"]={
+                "seed": s,
+                "params": trained_params,
+                "loss":loss,
+            }
 
             if loss < best_seed_loss:
                 best_seed_loss = loss
@@ -279,18 +294,22 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
 
         bic = run_model.compute_bic(len(U_train),best_seed_loss,3*N+1)
 
-        history[cell] = {
+        history[cell]["best_seed"] = {
             "losses": best_seed_losses,
-            "best_params": best_seed_params,
-            "best_loss": best_seed_loss,
+            "params": best_seed_params,
+            "loss": best_seed_loss,
+            "seed": best_seed,
             "bic": bic
         }
 
         if cell == "U1":
-            history["avg_losses"] = best_seed_val_losses
-            history["avg_best_loss"] = jnp.mean(jnp.array([jnp.sum(optax.squared_error(y_pred, U_cell)) for U_cell in U_val]))
-            history["avg_bic"] = run_model.compute_bic(len(U_train),history["avg_best_loss"],3*N+1)
-            history["avg_aic"] = run_model.compute_aic(len(U_train),history["avg_best_loss"],3*N+1)
+            avg_loss = jnp.mean(jnp.array([compute_loss(trained_params,I, U_cell, fs)for U_cell in U_val]))
+            history["avg_best_seed"] = {
+                "losses": best_seed_val_losses,
+                "loss":avg_loss,
+                "bic": run_model.compute_bic(len(U_train),avg_loss,3*N+1),
+                "aic": run_model.compute_aic(len(U_train),avg_loss,3*N+1)
+            }
 
 
     history["config"]= {
@@ -317,33 +336,33 @@ def main(model_name, N, iters, freq, debug, sampling_frequency):
     # print(f"\nTrained params: {trained_params}")
     # print(f"Final RMSE: {rmse:.4e},   CAE: {cae:.4f}")
 
-    best_y_pred = sim_z(I=I,fs=fs, **best_seed_params)
+    # best_y_pred = sim_z(I=I,fs=fs, **best_seed_params)
 
 
-    # --- plot loss curve ---
-    plt.figure(figsize=(6,4))
-    plt.plot(best_seed_losses, label="training loss")
-    plt.plot(history["avg_losses"], label="avg loss (all cells)")
-    # plt.yscale('log')
-    plt.xlabel("Step")
-    plt.ylabel("MSE Loss")
-    plt.title(f"Training Loss (N={N} blocks)")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig("plots/loss.png")
+    # # --- plot loss curve ---
+    # plt.figure(figsize=(6,4))
+    # plt.plot(best_seed_losses, label="training loss")
+    # plt.plot(history["avg_losses"], label="avg loss (all cells)")
+    # # plt.yscale('log')
+    # plt.xlabel("Step")
+    # plt.ylabel("MSE Loss")
+    # plt.title(f"Training Loss (N={N} blocks)")
+    # plt.legend()
+    # plt.tight_layout()
+    # plt.savefig("plots/loss.png")
 
-    # --- plot signals ---
-    plt.figure(figsize=(8,6))
-    plt.plot(U_cells[0], label="true")
-    plt.plot(best_y_pred, label="pred")
-    plt.xlim(0,min(el, len(U_train)))
-    plt.xlabel("Timestep")
-    plt.ylabel("Voltage")
-    plt.title(f"Simulated vs True (N={N} blocks)")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig("plots/signals.png")
-    plt.close()
+    # # --- plot signals ---
+    # plt.figure(figsize=(8,6))
+    # plt.plot(U_cells[0], label="true")
+    # plt.plot(best_y_pred, label="pred")
+    # plt.xlim(0,min(el, len(U_train)))
+    # plt.xlabel("Timestep")
+    # plt.ylabel("Voltage")
+    # plt.title(f"Simulated vs True (N={N} blocks)")
+    # plt.legend()
+    # plt.tight_layout()
+    # plt.savefig("plots/signals.png")
+    # plt.close()
 
 
 
@@ -358,6 +377,7 @@ if __name__ == "__main__":
     parser.add_argument("-f","--frequency",choices=["10","100","1000","10000","30000"],help="Chose the frequency",default="30000")
     parser.add_argument("-d", "--debug", action="store_true", help="debug")
     parser.add_argument("-s", "--sampling_frequency", help="Reduce sampling frequency for faster simulation",default=20)
+    parser.add_argument("-rs","--random_seeds",help="Number of random seeds to explore",default=100)
 
     args = parser.parse_args()
 
@@ -371,4 +391,5 @@ if __name__ == "__main__":
         freq=int(args.frequency), 
         debug=args.debug, 
         sampling_frequency=int(args.sampling_frequency),
+        n_seeds = int(args.random_seeds)
     )
