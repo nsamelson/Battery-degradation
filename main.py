@@ -10,11 +10,10 @@ import preprocess_data as preprocess
 import train
 
 
-def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds):
+def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibatch):
     work_dir = os.getcwd()
     el = 4000
     cells = ["U1","U2","U3","U4","U5","U6"]
-    minibatch = True
 
     # get data
     data = load_data.load_data(os.path.join(work_dir, "data"), freq)
@@ -75,11 +74,12 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds):
                 continue
 
             rng_key = jax.random.PRNGKey(s)
-            p = params if s==0 else preprocess.sample_params(key=rng_key, N=N)
+            init_params = preprocess.sample_params(key=rng_key, N=N)
+            p = params if s==0 else init_params.copy()
 
             # Pilot run
             pilot_loss = compute_loss(p, I, U_train, fs)
-            if pilot_loss > best_seed_loss * 500:
+            if pilot_loss > best_seed_loss * 1000:
                 print(f"Seed {s} is worse than best seed loss by {pilot_loss // best_seed_loss} times: {pilot_loss:.4f} vs {best_seed_loss:.4f}, skipping.")
                 bad_seeds.add(s)
                 continue
@@ -89,8 +89,6 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds):
             trained_params, losses, avg_val_losses = train.train_loop(p, I, U_train, fs, U_val, num_steps=iters,minibatch=minibatch)
 
             # compute metrics
-            # y_pred = sim_z(I=I,fs=fs, **trained_params)
-            # loss = jnp.mean(optax.squared_error(y_pred, U_train))
             loss = compute_loss(trained_params,I, U_train, fs)
             print(f"Seed {s}: Last training loss: {losses[-1]}, Loss: {loss}, best seed loss: {best_seed_loss}")
 
@@ -103,6 +101,7 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds):
             history[cell]["trainings"]={
                 "seed": s,
                 "params": trained_params,
+                "init_params": init_params,
                 "loss":loss,
             }
 
@@ -154,39 +153,6 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds):
     
     print(f"Saved history of training into {dir_path}/history.json")
 
-    # compute metrics
-    
-    # print(f"\nTrained params: {trained_params}")
-    # print(f"Final RMSE: {rmse:.4e},   CAE: {cae:.4f}")
-
-    # best_y_pred = sim_z(I=I,fs=fs, **best_seed_params)
-
-
-    # # --- plot loss curve ---
-    # plt.figure(figsize=(6,4))
-    # plt.plot(best_seed_losses, label="training loss")
-    # plt.plot(history["avg_losses"], label="avg loss (all cells)")
-    # # plt.yscale('log')
-    # plt.xlabel("Step")
-    # plt.ylabel("MSE Loss")
-    # plt.title(f"Training Loss (N={N} blocks)")
-    # plt.legend()
-    # plt.tight_layout()
-    # plt.savefig("plots/loss.png")
-
-    # # --- plot signals ---
-    # plt.figure(figsize=(8,6))
-    # plt.plot(U_cells[0], label="true")
-    # plt.plot(best_y_pred, label="pred")
-    # plt.xlim(0,min(el, len(U_train)))
-    # plt.xlabel("Timestep")
-    # plt.ylabel("Voltage")
-    # plt.title(f"Simulated vs True (N={N} blocks)")
-    # plt.legend()
-    # plt.tight_layout()
-    # plt.savefig("plots/signals.png")
-    # plt.close()
-
 
 
 
@@ -201,6 +167,7 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--debug", action="store_true", help="debug")
     parser.add_argument("-s", "--sampling_frequency", help="Reduce sampling frequency for faster simulation",default=20)
     parser.add_argument("-rs","--random_seeds",help="Number of random seeds to explore",default=100)
+    parser.add_argument("-m", "--minibatch", action="store_true", help="minibatch the process")
 
     args = parser.parse_args()
 
@@ -214,5 +181,6 @@ if __name__ == "__main__":
         freq=int(args.frequency), 
         debug=args.debug, 
         sampling_frequency=int(args.sampling_frequency),
-        n_seeds = int(args.random_seeds)
+        n_seeds = int(args.random_seeds),
+        minibatch=args.minibatch
     )

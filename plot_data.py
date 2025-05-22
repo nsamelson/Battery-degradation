@@ -51,7 +51,7 @@ def plot_all_losses(full_history, model_name):
     plt.figure(figsize=(6,4))
     for key, val in full_history.items():
         losses = val["losses"]
-        plt.plot(losses, label=f"{key} blocks")
+        plt.plot(losses, label=f"{key} blocks",linestyle="--")
         # plt.plot(avg_losses, label="avg loss (all cells)")
     # plt.yscale('log')
     plt.xlabel("Step")
@@ -116,7 +116,7 @@ if __name__ == "__main__":
         plot_signal(U, y_pred, config, 2000)
 
 
-        print(f"{N} blocks: Loss={best_loss}, BIC={best_bic}")
+        print(f"{N} blocks: Loss={best_loss:.5f}, BIC={best_bic:.2f}")
         full_hist[N] = {
             "losses": losses,
             "avg_losses":avg_losses,
