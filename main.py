@@ -1,193 +1,14 @@
-import glob
-import math
-import matplotlib.pyplot as plt
-import numpy as np
 import argparse
 import os
 import json
-from EarlyStopping import EarlyStopping
-import run_model
-import optax
 import jax
 import jax.numpy as jnp
-from jax import jit
-import vb_eis.state_space_sim as state_space_sim
-import h5py
-import scipy.signal as signal
-from tqdm import tqdm
 
-# jax.config.update("jax_debug_nans", True)
+import load_data
+from models import *
+import preprocess_data as preprocess
+import train
 
-def clean_for_json(obj):
-
-    if isinstance(obj, dict):
-        return {k: clean_for_json(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [clean_for_json(v) for v in obj]
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, jnp.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, np.generic):  # catches all np.float32, np.int64, etc.
-        return obj.item()
-    else:
-        return obj
-
-@jax.jit
-def sim_z(Rs, R, C, alpha,fs, I):
-    A, bl, m, d, T_end = state_space_sim.jgen(10**Rs,10**R,10**C,alpha,fs,len(I))
-    mask = state_space_sim.generate_mask(A.shape)
-    x_init = np.zeros(A.shape)
-    return state_space_sim.forward_sim(A, bl, m, d, jnp.array(x_init), I, mask)
-
-@jax.jit
-def compute_loss(params, y, U, fs):
-    y_pred = sim_z(I=y,fs=fs, **params)
-    # loss = jnp.sum(optax.squared_error(y_pred, U))
-    # loss = jnp.sum(jnp.abs(y_pred - U))
-    # loss = jnp.mean(jnp.abs(y_pred - U))
-    loss = jnp.mean(optax.squared_error(y_pred, U))
-
-    return loss
-
-
-def make_optimizer(params, lr_res=1e-2, lr_alpha=5e-4, lr_cap=1e-2):
-    warmup = 40
-    decay = 200
-    
-    res_optim   = optax.adamw(learning_rate=optax.warmup_cosine_decay_schedule(0.,lr_res,warmup,decay,lr_res*0.1),
-                                weight_decay=1e-4)
-    alpha_optim = optax.adamw(learning_rate=optax.warmup_cosine_decay_schedule(0.,lr_alpha,warmup,decay,lr_alpha*0.1),
-                                weight_decay=1e-4)
-    cap_optim   = optax.adamw(learning_rate=optax.warmup_cosine_decay_schedule(0.,lr_cap,warmup,decay,lr_cap*0.1),
-                                weight_decay=1e-4)
-
-    res_mask   = {k: (k == 'Rs' or k == 'R')   for k in params}
-    alpha_mask = {k: (k == 'alpha')            for k in params}
-    cap_mask   = {k: (k == 'C' or k == 'Q')    for k in params}
-
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(1.0),   
-        optax.masked(res_optim,   res_mask),
-        optax.masked(alpha_optim, alpha_mask),
-        optax.masked(cap_optim,   cap_mask),
-    )
-    # optimizer = optax.apply_if_finite(optimizer, max_consecutive_errors=1)
-
-    return optimizer
-
-def data_stream(signals, batch_size):
-    for i in range(0, len(signals[0]), batch_size):
-        yield (signals[j][i:i+batch_size] for j in range(len(signals)))
-
-def step(params, opt_state, I, U_train, optimizer, fs, minibatch=True, U_val = None):
-
-    # setup batches
-    batches = data_stream([I, U_train], 2000) if minibatch else [(I, U_train)]
-
-    tot_loss = 0.
-    avg_val_loss = 0.
-    for I_batch, U_batch in batches:
-        # still differentiate w.r.t. params
-        loss, grads = jax.value_and_grad(compute_loss)(params, I_batch, U_batch, fs)
-        updates, opt_state = optimizer.update(grads, opt_state, params)
-        params = optax.apply_updates(params, updates)
-
-        tot_loss += loss
-
-        # Clip parameters
-        params['R']     = jnp.clip(params['R'],     a_min=-5., a_max=2.0)
-        params['Rs']    = jnp.clip(params['Rs'],    a_min=-5., a_max=2.0)
-        params['alpha'] = jnp.clip(params['alpha'], a_min=0.6,  a_max=1.0)
-        params['C']     = jnp.clip(params['C'],     a_min=1.0,  a_max=4.0)
-
-    
-    # Simulate once for full val loss
-    if U_val:
-        y_pred_val = sim_z(I=I, fs=fs, **params)
-
-        val_losses = [jnp.mean(optax.squared_error(y_pred_val, U_cell_val)) for U_cell_val in U_val]
-        avg_val_loss = jnp.mean(jnp.array(val_losses))
-
-    return params, opt_state, tot_loss, avg_val_loss
-
-
-def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,minibatch=True):
-    optimizer = make_optimizer(params)
-    opt_state = optimizer.init(params)
-
-    losses = []
-    avg_val_losses = []
-    early_stopper = EarlyStopping(patience=30, min_delta=5e-4)
-    pbar = tqdm(range(num_steps), desc="Training")
-
-    for _ in pbar:
-        params, opt_state, loss, avg_val_loss = step(params, opt_state, I, U_train, optimizer, fs,minibatch, U_val=U_val)   
-
-        if not jnp.isfinite(loss):
-            print("Loss is NaN or Inf — stopping...")
-            break
-
-        losses.append(loss.item())
-
-        if U_val and avg_val_loss:
-            avg_val_losses.append(avg_val_loss.item())
-
-        # Early stop
-        early_stopper(loss.item(), params)
-        if early_stopper.should_stop:
-            # print(f"Early stopping triggered after {early_stopper.patience} epochs without improvement.")
-            break
-
-        pbar.set_description(
-            f"Train loss={loss:.4e}, Rs={10**params['Rs']:.5f},"
-            f"R={[f'{10**r:.5f}' for r in params['R'].tolist()]}, "
-            f"C={[f'{10**c:.2f}' for c in params['C'].tolist()]}, "
-            f"a={[f'{a:.4f}' for a in params['alpha'].tolist()]}"
-        )
-            
-    return early_stopper.best_params, losses, avg_val_losses
-
-
-def load_data(path, freq):
-    
-    freq_str = f"{freq}hz"
-    pattern = os.path.join(path, f"*{freq_str}*.mat")
-    matches = glob.glob(pattern)
-
-    if not matches:
-        raise FileNotFoundError(f"No dataset file found for frequency: {freq_str}")
-    
-    with h5py.File(matches[0], 'r') as f:
-        data = {
-            "fs": f['fs'][()][0].squeeze().item(),
-            "I": f['I'][()].squeeze(),
-            **{f"U{i}": f[f'U{i}'][()].squeeze() for i in range(1,7)}
-        }
-    return data
-
-def decimate_signal(orig_signal, fs, new_sampling_freq):
-    factor = fs // new_sampling_freq
-    return signal.decimate(orig_signal,int(factor),ftype='fir',n=20)[10:-10]
-
-def correct_signal(orig_signal):
-    corr_signal = orig_signal*(-1) * 50/.625
-    return corr_signal
-
-def sample_params(key, N):
-    keys = jax.random.split(key, 4)
-
-    Rs = jax.random.uniform(keys[0], (), minval=-5, maxval=2)
-    R = jax.random.uniform(keys[1], (N,), minval=-5, maxval=2)
-    alpha = jax.random.uniform(keys[2], (N,), minval=0.65, maxval=1.0)
-    C = jax.random.uniform(keys[3], (N,), minval=1.0, maxval=4.0)
-
-    return {
-        'Rs': Rs,
-        'R': R,
-        'C': C,  # because your model expects log(C)
-        'alpha': alpha
-    }
 
 def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds):
     work_dir = os.getcwd()
@@ -196,12 +17,12 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds):
     minibatch = True
 
     # get data
-    data = load_data(os.path.join(work_dir, "data"), freq)
+    data = load_data.load_data(os.path.join(work_dir, "data"), freq)
     fs = float(data["fs"])
 
     # decimate and correct offset
-    I = correct_signal(decimate_signal(data["I"],fs,sampling_frequency))
-    U_cells = [decimate_signal(data[cell],fs,sampling_frequency) for cell in cells]
+    I = preprocess.correct_signal(preprocess.decimate_signal(data["I"],fs,sampling_frequency))
+    U_cells = [preprocess.decimate_signal(data[cell],fs,sampling_frequency) for cell in cells]
 
     if debug:
         U_cells = [cell[:el] for cell in U_cells]
@@ -254,7 +75,7 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds):
                 continue
 
             rng_key = jax.random.PRNGKey(s)
-            p = params if s==0 else sample_params(key=rng_key, N=N)
+            p = params if s==0 else preprocess.sample_params(key=rng_key, N=N)
 
             # Pilot run
             pilot_loss = compute_loss(p, I, U_train, fs)
@@ -264,7 +85,8 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds):
                 continue
 
             # full run
-            trained_params, losses, avg_val_losses = train_loop(p, I, U_train, fs, U_val, num_steps=iters,minibatch=minibatch)
+            # TODO: maybe send the best seed loss within the train loop and break if after x epochs we see still a big difference
+            trained_params, losses, avg_val_losses = train.train_loop(p, I, U_train, fs, U_val, num_steps=iters,minibatch=minibatch)
 
             # compute metrics
             # y_pred = sim_z(I=I,fs=fs, **trained_params)
@@ -292,7 +114,7 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds):
                 if cell == "U1":
                     best_seed_val_losses = avg_val_losses
 
-        bic = run_model.compute_bic(len(U_train),best_seed_loss,3*N+1)
+        bic = compute_bic(len(U_train),best_seed_loss,3*N+1)
 
         history[cell]["best_seed"] = {
             "losses": best_seed_losses,
@@ -307,19 +129,20 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds):
             history["avg_best_seed"] = {
                 "losses": best_seed_val_losses,
                 "loss":avg_loss,
-                "bic": run_model.compute_bic(len(U_train),avg_loss,3*N+1),
-                "aic": run_model.compute_aic(len(U_train),avg_loss,3*N+1)
+                "bic": compute_bic(len(U_train),avg_loss,3*N+1),
+                "aic": compute_aic(len(U_train),avg_loss,3*N+1)
             }
 
 
     history["config"]= {
         "model_name": model_name,
-        "path": os.path.join(work_dir, "data"),
+        "path": os.path.join(work_dir, "output"),
         "best_seed": best_seed,
         "freq":freq,
         "debug":debug,
         "sampling_frequency": sampling_frequency,
-        "fs": fs
+        "fs": fs,
+        "N":N
     }
 
     # save history
@@ -327,7 +150,7 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds):
     os.makedirs(dir_path, exist_ok=True)
 
     with open(f"{dir_path}/history.json", "w") as outfile: 
-        json.dump(clean_for_json(history), outfile)
+        json.dump(load_data.clean_for_json(history), outfile)
     
     print(f"Saved history of training into {dir_path}/history.json")
 
