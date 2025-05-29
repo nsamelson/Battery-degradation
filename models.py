@@ -43,20 +43,19 @@ def compute_loss(params, y, U, fs):
     return loss
 
 
-def make_optimizer(params, lr_res=1e-2, lr_alpha=5e-4, lr_cap=1e-2):
+def make_optimizer(params, lr_res=1e-2, lr_alpha=5e-4, lr_cap=5e-3, opt_type="adam"):
     warmup = 40
     decay = 200
 
-    res_optim = optax.adam(lr_res)
-    alpha_optim = optax.adam(lr_alpha)
-    cap_optim = optax.adam(lr_cap)
+    if opt_type == "adam":
+        res_optim = optax.adam(lr_res)
+        alpha_optim = optax.adam(lr_alpha)
+        cap_optim = optax.adam(lr_cap)
     
-    # res_optim   = optax.adamw(learning_rate=optax.warmup_cosine_decay_schedule(0.,lr_res,warmup,decay,lr_res*0.1),
-    #                             weight_decay=1e-4)
-    # alpha_optim = optax.adamw(learning_rate=optax.warmup_cosine_decay_schedule(0.,lr_alpha,warmup,decay,lr_alpha*0.1),
-    #                             weight_decay=1e-4)
-    # cap_optim   = optax.adamw(learning_rate=optax.warmup_cosine_decay_schedule(0.,lr_cap,warmup,decay,lr_cap*0.1),
-    #                             weight_decay=1e-4)
+    elif opt_type == "adamw":
+        res_optim   = optax.adamw(learning_rate=optax.warmup_cosine_decay_schedule(0.,lr_res,warmup,decay,lr_res*0.1),weight_decay=1e-4)
+        alpha_optim = optax.adamw(learning_rate=optax.warmup_cosine_decay_schedule(0.,lr_alpha,warmup,decay,lr_alpha*0.1),weight_decay=1e-4)
+        cap_optim   = optax.adamw(learning_rate=optax.warmup_cosine_decay_schedule(0.,lr_cap,warmup,decay,lr_cap*0.1),weight_decay=1e-4)
 
     res_mask   = {k: (k == 'Rs' or k == 'R')   for k in params}
     alpha_mask = {k: (k == 'alpha')            for k in params}
@@ -68,6 +67,5 @@ def make_optimizer(params, lr_res=1e-2, lr_alpha=5e-4, lr_cap=1e-2):
         optax.masked(alpha_optim, alpha_mask),
         optax.masked(cap_optim,   cap_mask),
     )
-    # optimizer = optax.apply_if_finite(optimizer, max_consecutive_errors=1)
 
     return optimizer

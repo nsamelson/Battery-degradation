@@ -44,11 +44,12 @@ def step(params, opt_state, I, U_train, optimizer, fs, minibatch=True, U_val = N
     return params, opt_state, tot_loss, avg_val_loss
 
 
-def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,minibatch=True):
-    optimizer = make_optimizer(params)
+def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,minibatch=True, opt_type="adam"):
+    optimizer = make_optimizer(params,opt_type=opt_type)
     opt_state = optimizer.init(params)
 
     losses = []
+    params_progress = {k: [] for k in params}
     avg_val_losses = []
     early_stopper = EarlyStopping(patience=30, min_delta=5e-4)
     pbar = tqdm(range(num_steps), desc="Training")
@@ -61,6 +62,8 @@ def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,minibatch=Tru
             break
 
         losses.append(loss.item())
+        for k in params_progress:
+            params_progress[k].append(params[k])
 
         if U_val and avg_val_loss:
             avg_val_losses.append(avg_val_loss.item())
@@ -78,5 +81,5 @@ def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,minibatch=Tru
             f"a={[f'{a:.4f}' for a in params['alpha'].tolist()]}"
         )
             
-    return early_stopper.best_params, losses, avg_val_losses
+    return early_stopper.best_params, losses, avg_val_losses, params_progress
 

@@ -10,7 +10,7 @@ import preprocess_data as preprocess
 import train
 
 
-def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibatch):
+def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibatch, optimizer):
     work_dir = os.getcwd()
     el = 4000
     cells = ["U1","U2","U3","U4","U5","U6"]
@@ -39,7 +39,7 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
     params = {
         'Rs':    jnp.array(jnp.log10(3e-3)),                   # initial supply resistance
         'R':     jnp.ones((N,)) * jnp.log10(5e-2) ,             # block resistances
-        'C':     jnp.log(jnp.array([10.,100.,1000,500.,500.,500.])[:N]) ,            # block capacitances
+        'C':     jnp.log10(jnp.array([20.,100.,1000,500.,500.,500.])[:N]) , # block capacitances
         'alpha': jnp.ones((N,)) * 0.75,             # fractional factors
     }
 
@@ -63,6 +63,7 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
         # setup best seed tracking
         best_seed_loss = float('inf')
         best_seed_params = None
+        best_seed_params_progress = {}
         best_seed_losses = []
         best_seed_val_losses = []
         best_seed = 0
@@ -72,10 +73,12 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
         for s in range(n_seeds + 1):
             if s in bad_seeds:
                 continue
-
+            
+            # generate random params if seed != 0
             rng_key = jax.random.PRNGKey(s)
             init_params = preprocess.sample_params(key=rng_key, N=N)
             p = params if s==0 else init_params.copy()
+            # print("Seed: ",s, log_to_exp(p))
 
             # Pilot run
             pilot_loss = compute_loss(p, I, U_train, fs)
@@ -86,7 +89,7 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
 
             # full run
             # TODO: maybe send the best seed loss within the train loop and break if after x epochs we see still a big difference
-            trained_params, losses, avg_val_losses = train.train_loop(p, I, U_train, fs, U_val, num_steps=iters,minibatch=minibatch)
+            trained_params, losses, avg_val_losses, params_progress = train.train_loop(p, I, U_train, fs, U_val, num_steps=iters,minibatch=minibatch,opt_type=optimizer)
 
             # compute metrics
             loss = compute_loss(trained_params,I, U_train, fs)
@@ -97,17 +100,21 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
                 print(f"Seed {s} is worse than best seed loss by {loss // best_seed_loss} times, {loss:.4f} vs {best_seed_loss:.4f}, skipping.")
                 bad_seeds.add(s)
                 continue
+                
+            if "trainings" not in history[cell]:
+                history[cell]["trainings"] = []
 
-            history[cell]["trainings"]={
+            history[cell]["trainings"].append({
                 "seed": s,
-                "params": trained_params,
-                "init_params": init_params,
+                "init_params": preprocess.log_to_exp(p),
+                "params": preprocess.log_to_exp(trained_params),
                 "loss":loss,
-            }
+            })
 
             if loss < best_seed_loss:
                 best_seed_loss = loss
                 best_seed_params = trained_params
+                best_seed_params_progress = params_progress
                 best_seed_losses = losses
                 best_seed = s
                 if cell == "U1":
@@ -117,7 +124,8 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
 
         history[cell]["best_seed"] = {
             "losses": best_seed_losses,
-            "params": best_seed_params,
+            "params": preprocess.log_to_exp(best_seed_params),
+            "params_progress": best_seed_params_progress,
             "loss": best_seed_loss,
             "seed": best_seed,
             "bic": bic
@@ -168,6 +176,7 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--sampling_frequency", help="Reduce sampling frequency for faster simulation",default=20)
     parser.add_argument("-rs","--random_seeds",help="Number of random seeds to explore",default=100)
     parser.add_argument("-m", "--minibatch", action="store_true", help="minibatch the process")
+    parser.add_argument("-o", "--optimizer", choices=["adam","adamw",], help="optimizer type",default="adam")
 
     args = parser.parse_args()
 
@@ -182,5 +191,6 @@ if __name__ == "__main__":
         debug=args.debug, 
         sampling_frequency=int(args.sampling_frequency),
         n_seeds = int(args.random_seeds),
-        minibatch=args.minibatch
+        minibatch=args.minibatch,
+        optimizer=args.optimizer
     )

@@ -20,5 +20,5 @@ echo "SLURM_CPUS_ON_NODE=$SLURM_CPUS_ON_NODE"
 N=${SLURM_ARRAY_TASK_ID}
 
 
-apptainer exec --nv jaxtainer python3 main.py -n optax_simpleadam -i 1000 -f 10 -s 2000 -rs 20 -N ${N}
+apptainer exec --nv jaxtainer python3 main.py -n adamadjusted -i 1000 -f 10 -s 2000 -rs 30 -m -o adam -N ${N}
 

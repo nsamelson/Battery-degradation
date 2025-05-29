@@ -24,3 +24,18 @@ def sample_params(key, N):
         'C': C,  # because your model expects log(C)
         'alpha': alpha
     }
+
+def log_to_exp(params, selected=["R","Rs","C"]):
+    out_params = {}
+
+    for key, val in params.items():
+        if key in selected:
+            try:
+                out_params[key] = [10**param for param in val.tolist()]
+            except:
+                out_params[key] = 10**val
+        else:
+            out_params[key] = val
+
+    return out_params
+
