@@ -27,6 +27,53 @@ def plot_loss_curve(losses: list, avg_losses:list, config:dict):
     plt.tight_layout()
     plt.savefig(save_path)
 
+def plot_params_progress(params_progress: dict, losses: list, config: dict, params_to_plot=["R", "Rs", "C", "alpha"]):
+    N = config["N"]
+    save_path = os.path.join("output", config["model_name"], "params_over_loss.png")
+
+    fig, axs = plt.subplots(2, 2, figsize=(10, 6), sharex=True)
+    axs = axs.flatten()
+    
+    param_groups = {
+        "R": 0,
+        "Rs": 0,
+        "C": 1,
+        "alpha": 2
+    }
+
+    titles = ["R and Rs (log-scale)", "C (log-scale)", "Alpha", "Loss only"]
+
+    for pname in params_to_plot:
+        if pname not in params_progress:
+            continue
+        ax_idx = param_groups.get(pname, 3)
+        ax = axs[ax_idx]
+
+        param_array = np.array(params_progress[pname])  # shape: (steps, dim) or (steps,)
+        if param_array.ndim == 1:
+            param_array = param_array[:, np.newaxis]
+
+        for i in range(param_array.shape[1]):
+            values = param_array[:, i]
+            if pname in ["R", "Rs", "C"]:
+                values = 10**values  # Stabilize / preserve scale
+                ax.set_yscale("log")
+            ax.plot(values, label=f"{pname}[{i}]", linestyle="--")
+
+    # Plot loss in all subplots
+    for i in range(4):
+        if i == 3:
+            axs[i].plot(losses, label="Loss", color="black")
+        axs[i].set_title(titles[i])
+        axs[i].legend()
+        axs[i].set_xlabel("Step")
+        if i in [0, 2]:
+            axs[i].set_ylabel("Value")
+
+    fig.suptitle(f"Training Loss and Parameters (N={N} blocks)", fontsize=14)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.savefig(save_path)
+    plt.close()
 
 def plot_signal(U, y_pred, config:dict, el):
 
@@ -68,7 +115,7 @@ if __name__ == "__main__":
 
     # ------ Parameters ------
     freq = 10
-    model_name = "optaxrun"
+    model_name = "testoptax"
     full_hist = {}
 
 
@@ -79,16 +126,19 @@ if __name__ == "__main__":
 
 
         losses = history["U1"]["best_seed"]["losses"]
+        params_progress = history["U1"]["best_seed"]["params_progress"]
         avg_losses = history["avg_best_seed"]["losses"]
 
         config = history["config"]
         config["N"] = N
 
         plot_loss_curve(losses,avg_losses,config)
+        plot_params_progress(params_progress,losses,config)
 
         # get stuff from hist
-        best_loss = history["U1"]["best_seed"]["loss"]
-        best_bic = history["U1"]["best_seed"]["bic"]
+        best_loss = history["avg_best_seed"]["loss"]
+        best_bic = history["avg_best_seed"]["bic"]
+        best_aic = history["avg_best_seed"]["aic"]
         params = history["U1"]["best_seed"]["params"]
         params["Rs"] = jnp.array(params["Rs"])
         params["R"] = jnp.array(params["R"])
@@ -116,7 +166,7 @@ if __name__ == "__main__":
         plot_signal(U, y_pred, config, 2000)
 
 
-        print(f"{N} blocks: Loss={best_loss:.5f}, BIC={best_bic:.2f}")
+        print(f"{N} blocks: Loss={best_loss:.5f}, BIC={best_bic:.2f}, AIC={best_aic:.2f}")
         full_hist[N] = {
             "losses": losses,
             "avg_losses":avg_losses,
