@@ -108,14 +108,66 @@ def plot_all_losses(full_history, model_name):
     plt.tight_layout()
     plt.savefig(save_path)
 
+def plot_param_evolution(history, param_names=["R", "C", "alpha"], cell="U1"):
+    save_path = os.path.join("output", history["config"]["model_name"], "params_evolution.png")
+    data = history[cell]["trainings"]
+    config = history["config"]
+    N = config["N"]
 
+    fig, axes = plt.subplots(len(param_names), N, figsize=(4*N, 3 * len(param_names)), squeeze=False)
+    axes = np.atleast_2d(axes)
+
+    all_handles = []
+    all_labels = []
+    
+    for i, pname in enumerate(param_names):
+        for j in range(N):
+            ax = axes[i][j]
+            for entry in data:
+                init = entry["init_params"][pname]
+                final = entry["params"][pname]
+
+                init = init if isinstance(init, list) else [init]
+                final = final if isinstance(final, list) else [final]
+
+                if j >= len(init) or j >= len(final):
+                    continue
+
+                if pname in ["R","C"]:
+                    ax.set_yscale("log")
+
+                line,= ax.plot([0, 1], [init[j], final[j]], marker='o',linestyle="--", label=f"Seed {entry['seed']}")
+                if i == 0 and j == 0:  # Collect legend items only from first subplot
+                    all_handles.append(line)
+                    all_labels.append(f"Seed {entry['seed']}")
+
+
+            if i==0:
+                ax.set_title(f"N={j}")
+            ax.set_xticks([0, 1])
+            ax.set_xticklabels(["Init", "Trained"])
+            ax.set_ylabel(f"{pname}_{j}")
+            ax.grid(True)
+
+
+    fig.legend(
+        all_handles,
+        all_labels,
+        loc='center left',
+        bbox_to_anchor=(1.01, 0.5),
+        title="Seeds"
+    )
+
+    plt.suptitle(f"Init vs trained params (N={N} block(s))")
+    fig.tight_layout(rect=[0, 0, 1, 1])
+    plt.savefig(save_path,bbox_inches='tight')
 
 
 if __name__ == "__main__":
 
     # ------ Parameters ------
     freq = 10
-    model_name = "testoptax"
+    model_name = "caparange"
     full_hist = {}
 
 
@@ -134,15 +186,16 @@ if __name__ == "__main__":
 
         plot_loss_curve(losses,avg_losses,config)
         plot_params_progress(params_progress,losses,config)
+        plot_param_evolution(history)
 
         # get stuff from hist
         best_loss = history["avg_best_seed"]["loss"]
         best_bic = history["avg_best_seed"]["bic"]
         best_aic = history["avg_best_seed"]["aic"]
         params = history["U1"]["best_seed"]["params"]
-        params["Rs"] = jnp.array(params["Rs"])
-        params["R"] = jnp.array(params["R"])
-        params["C"] = jnp.array(params["C"])
+        params["Rs"] = jnp.log10(jnp.array(params["Rs"]))
+        params["R"] = jnp.log10(jnp.array(params["R"]))
+        params["C"] = jnp.log10(jnp.array(params["C"]))
         params["alpha"] = jnp.array(params["alpha"])
 
         # get data
@@ -160,9 +213,13 @@ if __name__ == "__main__":
         # scale up
         I *= 200
         U *= 200
+        # print(I, U)
 
         # plot signal
         y_pred = sim_z(I=I[:2000],fs=config["fs"], **params)
+
+        # y_pred *= 200
+
         plot_signal(U, y_pred, config, 2000)
 
 
