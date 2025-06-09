@@ -22,7 +22,7 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
     # decimate and correct offset
     I = preprocess.correct_signal(preprocess.decimate_signal(data["I"],fs,sampling_frequency))
     U_cells = [preprocess.decimate_signal(data[cell],fs,sampling_frequency) for cell in cells]
-
+    
     if debug:
         U_cells = [cell[:el] for cell in U_cells]
         I= I[:el]
@@ -31,9 +31,10 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
     I -= jnp.mean(I)
     U_cells = [cell - jnp.mean(cell) for cell in U_cells]
 
+
     # scale up
-    I *= 200
-    U_cells = [cell* 200 for cell in U_cells]
+    # I *= 200
+    # U_cells = [cell* 200 for cell in U_cells]
 
     # init parameters
     params = {
@@ -94,6 +95,10 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
             # compute metrics
             loss = compute_loss(trained_params,I, U_train, fs)
             print(f"Seed {s}: Last training loss: {losses[-1]}, Loss: {loss}, best seed loss: {best_seed_loss}")
+
+            if not jnp.isfinite(loss):
+                bad_seeds.add(s)
+                continue
 
             # skip seeds if loss is 10* larger than the best loss
             if loss > best_seed_loss * 50:
