@@ -22,16 +22,21 @@ def step(params, opt_state, I, U_train, optimizer, fs, minibatch=True, U_val = N
     for I_batch, U_batch in batches:
         # still differentiate w.r.t. params
         loss, grads = jax.value_and_grad(compute_loss)(params, I_batch, U_batch, fs)
+
+        if not jnp.isfinite(loss):
+            print(f"Loss is {loss}, params are {params}")
+            return None, opt_state, float('inf'), float('inf')
+
         updates, opt_state = optimizer.update(grads, opt_state, params)
         params = optax.apply_updates(params, updates)
 
         tot_loss += loss
 
         # Clip parameters
-        params['R']     = jnp.clip(params['R'],     a_min=-5., a_max=2.0)
-        params['Rs']    = jnp.clip(params['Rs'],    a_min=-5., a_max=2.0)
+        params['R']     = jnp.clip(params['R'],     a_min=-4., a_max=2.0)
+        params['Rs']    = jnp.clip(params['Rs'],    a_min=-4., a_max=2.0)
         params['alpha'] = jnp.clip(params['alpha'], a_min=0.6,  a_max=1.0)
-        params['C']     = jnp.clip(params['C'],     a_min=1.0,  a_max=4.0)
+        params['C']     = jnp.clip(params['C'],     a_min=-2.0,  a_max=5.0)
 
     
     # Simulate once for full val loss
@@ -51,15 +56,14 @@ def train_loop(params, I, U_train, fs, U_val= None, num_steps=1000,minibatch=Tru
     losses = []
     params_progress = {k: [] for k in params}
     avg_val_losses = []
-    early_stopper = EarlyStopping(patience=30, min_delta=5e-4)
+    early_stopper = EarlyStopping(patience=30, min_delta=5e-3)
     pbar = tqdm(range(num_steps), desc="Training")
 
     for _ in pbar:
         params, opt_state, loss, avg_val_loss = step(params, opt_state, I, U_train, optimizer, fs,minibatch, U_val=U_val)   
 
         if not jnp.isfinite(loss):
-            print("Loss is NaN or Inf — stopping...")
-            break
+            return early_stopper.best_params, losses, avg_val_losses, params_progress
 
         losses.append(loss.item())
         for k in params_progress:
