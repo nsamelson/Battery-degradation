@@ -13,10 +13,10 @@ def correct_signal(orig_signal):
 def sample_params(key, N):
     keys = jax.random.split(key, 4)
 
-    Rs = jax.random.uniform(keys[0], (), minval=-4, maxval=2)
-    R = jax.random.uniform(keys[1], (N,), minval=-4, maxval=2)
+    Rs =    jax.random.uniform(keys[0], (),   minval=-4, maxval=2)
+    R =     jax.random.uniform(keys[1], (N,), minval=-4, maxval=2)
     alpha = jax.random.uniform(keys[2], (N,), minval=0.6, maxval=1.0)
-    C = jax.random.uniform(keys[3], (N,), minval=-2.0, maxval=5.0)
+    C =     jax.random.uniform(keys[3], (N,), minval=0.0, maxval=5.0)
 
     return {
         'Rs': Rs,

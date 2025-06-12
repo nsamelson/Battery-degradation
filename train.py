@@ -34,9 +34,9 @@ def step(params, opt_state, I, U_train, optimizer, fs, minibatch=True, U_val = N
 
         # Clip parameters
         params['R']     = jnp.clip(params['R'],     a_min=-4., a_max=2.0)
-        params['Rs']    = jnp.clip(params['Rs'],    a_min=-4., a_max=2.0)
+        params['Rs']    = jnp.clip(params['Rs'],    a_min=-4, a_max=2.0)
         params['alpha'] = jnp.clip(params['alpha'], a_min=0.6,  a_max=1.0)
-        params['C']     = jnp.clip(params['C'],     a_min=-2.0,  a_max=5.0)
+        params['C']     = jnp.clip(params['C'],     a_min=0.0,  a_max=5.0)
 
     
     # Simulate once for full val loss
