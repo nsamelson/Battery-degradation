@@ -12,13 +12,13 @@
 
 
 # Debug output
-echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
-nvidia-smi
-echo "SLURM_CPUS_ON_NODE=$SLURM_CPUS_ON_NODE"
+# echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
+# nvidia-smi
+# echo "SLURM_CPUS_ON_NODE=$SLURM_CPUS_ON_NODE"
 
 # Set N from the array index
 N=${SLURM_ARRAY_TASK_ID}
 
 
-apptainer exec --nv jaxtainer python3 main.py -n adamadjusted -i 1000 -f 10 -s 2000 -rs 30 -m -o adam -N ${N}
+apptainer exec --nv jaxtainer python3 main.py -n smallsearch -i 1000 -f 10 -s 2000 -rs 25 -m -o adam -N ${N}
 

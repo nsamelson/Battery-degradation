@@ -79,7 +79,6 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
             rng_key = jax.random.PRNGKey(s)
             init_params = preprocess.sample_params(key=rng_key, N=N)
             p = params if s==0 else init_params.copy()
-            # print("Seed: ",s, log_to_exp(p))
 
             # Pilot run
             pilot_loss = compute_loss(p, I, U_train, fs)
