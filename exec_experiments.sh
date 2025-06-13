@@ -20,5 +20,5 @@
 N=${SLURM_ARRAY_TASK_ID}
 
 
-apptainer exec --nv jaxtainer python3 main.py -n smallsearch -i 1000 -f 10 -s 2000 -rs 25 -m -o adam -N ${N}
+apptainer exec --nv jaxtainer python3 main.py -n searchloss -i 1000 -f 10 -s 2000 -rs 5 -m -o adam -l MSE -N ${N}
 

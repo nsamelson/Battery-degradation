@@ -33,15 +33,20 @@ def sim_z(Rs, R, C, alpha,fs, I):
     return state_space_sim.forward_sim(A, bl, m, d, jnp.array(x_init), I, mask)
 
 @jax.jit
-def compute_loss(params, y, U, fs):
-    y_pred = sim_z(I=y,fs=fs, **params)
-    # loss = jnp.sum(optax.squared_error(y_pred, U))
-    # loss = jnp.mean(optax.squared_error(y_pred, U))   # mse
-    # loss = jnp.sqrt(jnp.mean((y_pred - U)**2))  # rmse
-    # loss = jnp.mean(jnp.abs((y_pred - U) / (U + 1e-8))) #*100 # mape
-    loss = jnp.sum(jnp.abs(y_pred - U)) # CAE
+def compute_loss(params, y, U, fs, loss_code=0):
+    y = jnp.asarray(y)
+    U = jnp.asarray(U)
+    y_pred = sim_z(I=y, fs=fs, **params)
+    y_pred = jnp.asarray(y_pred)
 
-    return loss
+    def mse():  return jnp.mean(optax.squared_error(y_pred, U))
+    def rmse(): return jnp.sqrt(jnp.mean((y_pred - U) ** 2))
+    def cse():  return jnp.sum(optax.squared_error(y_pred, U))
+    def cae():  return jnp.sum(jnp.abs(y_pred - U))
+    def mape(): return jnp.mean(jnp.abs((y_pred - U) / (U + 1e-8))) * 100.
+
+    return jax.lax.switch(loss_code, [mse, rmse, cse, cae, mape])
+
 
 
 def make_optimizer(params, lr_res=5e-3, lr_alpha=2e-4, lr_cap=2e-3, opt_type="adam"):
