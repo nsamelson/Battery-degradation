@@ -62,10 +62,10 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
 
     for s in range(n_seeds + 1):
 
-        print(f"\n🔁 Seed {s}")
         rng_key = jax.random.PRNGKey(s)
         init_params = base_params if s == 0 else preprocess.sample_params(key=rng_key, N=N)
 
+        print(f"\n🔁 Seed {s}, init params: {preprocess.log_to_exp(init_params)}")
         seed_result = {"seed": s, "folds": [], "avg_val_loss": None}
         val_losses = []
 
@@ -76,16 +76,24 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
             U_val = U_cells[val_cell]
 
             # pilot loss
-            pilot_loss = compute_loss(init_params.copy(), I, U_val, fs, loss_code =loss_code )
+            try:
+                pilot_loss = compute_loss(init_params.copy(), I, U_val, fs, loss_code =loss_code )
+            except:
+                print("Seed unstable, skip")
+                break
 
             if s > 0 and pilot_loss > 100 * best_avg_val_loss:
-                print(f"🚫 Skipping bad seed {s} (pilot val loss {pilot_loss:.2e})")
-                continue
+                print(f"🚫 Skipping bad seed {s} (pilot val loss {pilot_loss:.2e} vs {best_avg_val_loss:.2e})")
+                break
 
             trained_params, train_losses, val_losses_progress, params_progress = train.train_loop(
                 init_params.copy(), I, U_train, fs, U_val,
                 num_steps=iters, minibatch=minibatch, opt_type=optimizer, loss_code =loss_code 
             )
+
+            if not train_losses:
+                print("Seed became unstable while training, skip")
+                break
 
             val_loss = compute_loss(trained_params, I, U_val, fs, loss_code =loss_code )
             val_losses.append(val_loss)

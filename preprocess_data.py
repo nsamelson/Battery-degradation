@@ -15,8 +15,8 @@ def sample_params(key, N):
 
     Rs =    jax.random.uniform(keys[0], (),   minval=-4, maxval=2)
     R =     jax.random.uniform(keys[1], (N,), minval=-4, maxval=2)
-    alpha = jax.random.uniform(keys[2], (N,), minval=0.6, maxval=1.0)
-    C =     jax.random.uniform(keys[3], (N,), minval=0.0, maxval=5.0)
+    alpha = jax.random.uniform(keys[2], (N,), minval=0.6, maxval=0.99)
+    C =     jax.random.uniform(keys[3], (N,), minval=-2., maxval=5.0)
 
     return {
         'Rs': Rs,

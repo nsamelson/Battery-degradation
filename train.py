@@ -24,8 +24,7 @@ def step(params, opt_state, I, U_train, optimizer, fs, minibatch=True, U_val = N
             loss, grads = jax.value_and_grad(compute_loss)(params, I_batch, U_batch, fs, loss_code )
 
             if not jnp.isfinite(loss):
-                print(f"Loss is {loss}, params are {params}")
-                return None, opt_state, float('inf'), float('inf')
+                return params, opt_state, float('inf'), float('inf')
 
             updates, opt_state = optimizer.update(grads, opt_state, params)
             params = optax.apply_updates(params, updates)
@@ -35,8 +34,9 @@ def step(params, opt_state, I, U_train, optimizer, fs, minibatch=True, U_val = N
             # Clip parameters
             params['R']     = jnp.clip(params['R'],     a_min=-4., a_max=2.0)
             params['Rs']    = jnp.clip(params['Rs'],    a_min=-4, a_max=2.0)
-            params['alpha'] = jnp.clip(params['alpha'], a_min=0.6,  a_max=1.0)
-            params['C']     = jnp.clip(params['C'],     a_min=0.0,  a_max=5.0)
+            params['alpha'] = jnp.clip(params['alpha'], a_min=0.6,  a_max=0.99)
+            params['C']     = jnp.clip(params['C'],     a_min=-2.0,  a_max=5.0)
+
 
         cell_losses.append(train_loss)
 
@@ -63,8 +63,8 @@ def train_loop(params, I, U_train, fs, U_val, num_steps=1000,minibatch=True, opt
         params, opt_state, loss, val_loss = step(params, opt_state, I, U_train, optimizer, fs,minibatch, U_val, loss_code =loss_code )   
 
         if not jnp.isfinite(loss):
-            return early_stopper.best_params, losses, val_losses, params_progress
-
+            return early_stopper.best_params, None, None, params_progress
+        
         # add losses
         losses.append(loss.item())
         val_losses.append(val_loss.item())
