@@ -190,7 +190,7 @@ def plot_all_losses(full_history, model_name):
     plt.savefig(save_path)
     plt.close()
 
-def plot_param_evolution(history, param_names=["R", "C", "alpha", "Rs"], cell="U1"):
+def plot_param_evolution(history, param_names=["R", "C", "alpha"], cell="U1"):
     """
     Plots the evolution of parameters from initialization to trained values for each block.
 
@@ -213,64 +213,67 @@ def plot_param_evolution(history, param_names=["R", "C", "alpha", "Rs"], cell="U
         if fold["val_cell"] == cell
     }
 
+    # Get the best seed's parameters
+    best_params = history["seeds"][best_seed]["folds"][0]["params"]
+
     # Create subplots
-    fig, axes = plt.subplots(len(param_names), N, figsize=(4 * N, 3 * len(param_names)), squeeze=False)
+    fig, axes = plt.subplots(len(param_names), N, figsize=(3 * N, 2 * len(param_names)), squeeze=False)
     axes = np.atleast_2d(axes)
 
-    all_handles = []
-    all_labels = []
+    handles, labels = [], []  # Collect handles and labels for the legend
 
     for i, pname in enumerate(param_names):
         for j in range(N):
             ax = axes[i][j]
             for k, entry in trainings.items():
-                if pname == "Rs":
-                    init = entry[pname][0]
-                    final = entry[pname][-1]
-                else:
-                    init = entry[pname][0]
-                    final = entry[pname][-1]
+                init = entry[pname][0]
+                final = entry[pname][-1]
 
-                    # Handle single or multi-dimensional parameters
-                    init = init[j] if isinstance(init, list) else [init]
-                    final = final[j] if isinstance(final, list) else [final]
+                # Handle single or multi-dimensional parameters
+                init = init[j] if isinstance(init, list) else [init]
+                final = final[j] if isinstance(final, list) else [final]
 
                 # Convert to original scale for log-scale parameters
-                if pname in ["R", "C", "Rs"]:
+                if pname in ["R", "C"]:
                     ax.set_yscale("log")
                     init = 10**init
                     final = 10**final
 
-                # Mark the best seed
-                best_comm = " (best)" if k == best_seed else ""
-
-                # Plot parameter evolution
-                line, = ax.plot([0, 1], [init, final], marker="o", linestyle="--", label=f"Seed {k}")
-                if i == 0 and j == 0:  # Collect legend items only from the first subplot
-                    all_handles.append(line)
-                    all_labels.append(f"Seed {k}{best_comm}")
+                # Plot parameter evolution for all seeds
+                linestyle = "--" if k == best_seed else ":"
+                color = "red" if k == best_seed else "gray"
+                alpha = 1.0 if k == best_seed else 0.5
+                ax.plot([0, 1], [init, final], marker="o", linestyle=linestyle, color=color, alpha=alpha)
 
             # Configure subplot titles and labels
             if i == 0:
                 ax.set_title(f"N={j}")
-            ax.set_xticks([0, 1])
-            ax.set_xticklabels(["Init", "Trained"])
+            if i == len(param_names) - 1:  # Add x-axis labels only on the last row
+                ax.set_xticks([0, 1])
+                ax.set_xticklabels(["Init", "Trained"])
+            else:
+                ax.set_xticks([])  # Remove x-axis ticks for other rows
             ax.set_ylabel(f"{pname}_{j}" if pname != "Rs" else pname)
             ax.grid(True)
 
-    # Add a global legend
-    fig.legend(
-        all_handles,
-        all_labels,
-        loc="center left",
-        bbox_to_anchor=(1.01, 0.5),
-        title="Seeds"
-    )
+    # Add the best seed's parameters to the legend
+    best_params_str = ", ".join([
+        f"{key}={', '.join([f'{10**float(v):.2e}' for v in np.atleast_1d(val)])}" if key in ["R", "C"] and isinstance(val, (np.ndarray, list, jnp.ndarray)) else
+        f"{key}={', '.join([f'{float(v):.2e}' for v in np.atleast_1d(val)])}" if isinstance(val, (np.ndarray, list, jnp.ndarray)) else
+        f"{key}={10**float(np.atleast_1d(val)[0]):.2e}" if key in ["R", "C"] else
+        f"{key}={float(np.atleast_1d(val)[0]):.2e}"
+        for key, val in best_params.items()
+    ])
+    handles.append(plt.Line2D([0], [0], color="red", linestyle="--"))  # Ensure 'linestyle' is correctly spelled
+    labels.append(f"Best Seed {best_seed}: {best_params_str}")
+
+    # Add a global legend at the bottom center
+    fig.legend(handles, labels, loc="lower center", fontsize=10, ncol=1, bbox_to_anchor=(0.5, -0.1))
 
     # Add a global title and save the figure
-    plt.suptitle(f"Init vs Trained Parameters (N={N} block(s))")
-    fig.tight_layout(rect=[0, 0, 1, 1])
-    plt.savefig(save_path, bbox_inches="tight")
+    plt.suptitle(f"Init vs Trained Parameters (N={N} block(s))", fontsize=16)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    plt.savefig(save_path, bbox_inches="tight", dpi=300)
     plt.close()
 
 
