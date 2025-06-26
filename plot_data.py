@@ -190,68 +190,88 @@ def plot_all_losses(full_history, model_name):
     plt.savefig(save_path)
     plt.close()
 
-def plot_param_evolution(history, param_names=["R", "C", "alpha"], cell="U1"):
+def plot_param_evolution(history, param_names=["R", "C", "alpha", "Rs"], cell="U1"):
+    """
+    Plots the evolution of parameters from initialization to trained values for each block.
+
+    Args:
+        history (dict): Training history containing parameter progress.
+        param_names (list): List of parameter names to plot.
+        cell (str): Validation cell to filter the folds.
+    """
     save_path = os.path.join("output", history["config"]["model_name"], "params_evolution.png")
     config = history["config"]
     N = config["N"]
-    # data = history[cell]["trainings"]
     seeds = history["seeds"]
     best_seed = history["best_seed"]
-    trainings = {seed["seed"]:fold["params_progress"] for seed in seeds for fold in seed["folds"] if fold["val_cell"] == cell}
 
-    fig, axes = plt.subplots(len(param_names), N, figsize=(4*N, 3 * len(param_names)), squeeze=False)
+    # Extract parameter progress for the specified cell
+    trainings = {
+        seed["seed"]: fold["params_progress"]
+        for seed in seeds
+        for fold in seed["folds"]
+        if fold["val_cell"] == cell
+    }
+
+    # Create subplots
+    fig, axes = plt.subplots(len(param_names), N, figsize=(4 * N, 3 * len(param_names)), squeeze=False)
     axes = np.atleast_2d(axes)
 
     all_handles = []
     all_labels = []
-    
+
     for i, pname in enumerate(param_names):
         for j in range(N):
             ax = axes[i][j]
             for k, entry in trainings.items():
-                # init = entry["init_params"][pname]
-                # final = entry["params"][pname]
-                init = entry[pname][0]
-                final = entry[pname][-1]
+                if pname == "Rs":
+                    init = entry[pname][0]
+                    final = entry[pname][-1]
+                else:
+                    init = entry[pname][0]
+                    final = entry[pname][-1]
 
-                init = init[j] if isinstance(init, list) else [init]
-                final = final[j] if isinstance(final, list) else [final]
+                    # Handle single or multi-dimensional parameters
+                    init = init[j] if isinstance(init, list) else [init]
+                    final = final[j] if isinstance(final, list) else [final]
 
-                # if j >= len(init) or j >= len(final):
-                #     continue
-
-                if pname in ["R","C"]:
+                # Convert to original scale for log-scale parameters
+                if pname in ["R", "C", "Rs"]:
                     ax.set_yscale("log")
                     init = 10**init
-                    final = 10** final
+                    final = 10**final
 
-                best_comm = " (best)" if k== best_seed else ""
+                # Mark the best seed
+                best_comm = " (best)" if k == best_seed else ""
 
-                line,= ax.plot([0, 1], [init,final], marker='o',linestyle="--", label=f"Seed {k}")
-                if i == 0 and j == 0:  # Collect legend items only from first subplot
+                # Plot parameter evolution
+                line, = ax.plot([0, 1], [init, final], marker="o", linestyle="--", label=f"Seed {k}")
+                if i == 0 and j == 0:  # Collect legend items only from the first subplot
                     all_handles.append(line)
                     all_labels.append(f"Seed {k}{best_comm}")
 
-
-            if i==0:
+            # Configure subplot titles and labels
+            if i == 0:
                 ax.set_title(f"N={j}")
             ax.set_xticks([0, 1])
             ax.set_xticklabels(["Init", "Trained"])
-            ax.set_ylabel(f"{pname}_{j}")
+            ax.set_ylabel(f"{pname}_{j}" if pname != "Rs" else pname)
             ax.grid(True)
 
-
+    # Add a global legend
     fig.legend(
         all_handles,
         all_labels,
-        loc='center left',
+        loc="center left",
         bbox_to_anchor=(1.01, 0.5),
         title="Seeds"
     )
 
-    plt.suptitle(f"Init vs trained params (N={N} block(s))")
+    # Add a global title and save the figure
+    plt.suptitle(f"Init vs Trained Parameters (N={N} block(s))")
     fig.tight_layout(rect=[0, 0, 1, 1])
-    plt.savefig(save_path,bbox_inches='tight')
+    plt.savefig(save_path, bbox_inches="tight")
+    plt.close()
 
 
 def plot_loss_vs_parameter(history, parameter_name="Parameter"):
@@ -308,12 +328,18 @@ if __name__ == "__main__":
         folds = history["seeds"][best_seed]["folds"]
         loss_by_fold = [fold["val_loss"] for fold in folds]
 
-        # get best fold loss and BIC
-        avg_val_loss = history["seeds"][best_seed]["avg_val_loss"]
+        # Find the best seed by matching the "seed" field
+        best_seed_data = next(seed for seed in history["seeds"] if seed["seed"] == best_seed)
+
+        # Get best fold loss and BIC
+        avg_val_loss = best_seed_data["avg_val_loss"]
+        folds = best_seed_data["folds"]
+        loss_by_fold = [fold["val_loss"] for fold in folds]
         best_loss = min(loss_by_fold)
         best_fold_index = loss_by_fold.index(best_loss)
+        best_train_loss = folds[best_fold_index]["train_losses"][-1]  # Last training loss
         best_bic = folds[best_fold_index]["bic"]
-        print(f"N={N}, Seed: {best_seed}, Avg loss: {avg_val_loss:.4f}, Min loss: {best_loss:.4f}, BIC: {best_bic:.2f}")
+        print(f"N={N}, Seed: {best_seed}, Train loss: {best_train_loss:.4f}, Val loss: {best_loss:.4f}, BIC: {best_bic:.2f}")
 
         # get progresses
         losses = folds[best_fold_index]["train_losses"]
@@ -325,12 +351,12 @@ if __name__ == "__main__":
         config = history["config"]
         config["N"] = N
 
-        plot_loss_curve(history)
-        plot_params_progress(history)
-        plot_signal(history)
+        plot_loss_curve(history.copy())
+        plot_params_progress(history.copy())
+        plot_signal(history.copy())
         
-        plot_param_evolution(history)        
-        plot_loss_vs_parameter(history, parameter_name="Rs")
+        plot_param_evolution(history.copy())        
+        plot_loss_vs_parameter(history.copy(), parameter_name="Rs")
 
         # # get stuff from hist
         params = folds[best_fold_index]["params"]
