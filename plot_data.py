@@ -181,6 +181,39 @@ def plot_param_evolution(history, param_names=["R", "C", "alpha"], cell="U1"):
     plt.savefig(save_path,bbox_inches='tight')
 
 
+def plot_loss_vs_parameter(history, parameter_name="Parameter"):
+    """
+    Plots the loss (y-axis) over the parameter range (x-axis).
+    """
+    N = history["config"]["N"]
+    parameter_values = [seed["folds"][0]["params"][parameter_name] for seed in history["seeds"] if len(seed["folds"]) > 0]
+    losses = [seed["avg_val_loss"] for seed in history["seeds"] if len(seed["folds"]) > 0]
+    
+    initial_values = [10**seed["folds"][0]["params_progress"][parameter_name][0] for seed in history["seeds"] if len(seed["folds"]) > 0]
+    initial_losses = [seed["folds"][0]["val_losses"][0] for seed in history["seeds"] if len(seed["folds"]) > 0]
+
+    # get the best param value for the minimum loss
+    best_index = np.argmin(losses)
+    best_param_value = parameter_values[best_index]
+    best_loss = losses[best_index]
+
+    plt.figure(figsize=(6, 4))
+    plt.scatter(initial_values, initial_losses, color='green', label=f'Initial {parameter_name}', alpha=0.8)
+    plt.scatter(parameter_values, losses, color='royalblue', label=f'Trained {parameter_name}', alpha=0.8)
+    plt.scatter(best_param_value, best_loss, color='black', label=f'Best: {best_param_value:.2e}',marker="x")
+
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.xlabel(f"{parameter_name} Range", fontsize=12)
+    plt.ylabel("Loss", fontsize=12)
+    plt.title(f"Loss vs Initial and Trained {parameter_name} (N={N} block(s))", fontsize=14)
+    plt.legend(fontsize=10, loc='upper right')
+
+    save_path = os.path.join("output", history["config"]["model_name"], f"{parameter_name}_over_loss.png")
+    plt.savefig(save_path,bbox_inches='tight',dpi=300)
+    plt.tight_layout()
+    plt.close()
+
+
 if __name__ == "__main__":
 
     # ------ Parameters ------
