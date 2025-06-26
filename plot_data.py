@@ -121,21 +121,55 @@ def plot_params_progress(history, params_to_plot=["R", "Rs", "C", "alpha"]):
     fig.savefig(save_path, dpi=300)
     plt.close()
 
-def plot_signal(U, y_pred, config:dict, el):
-
+def plot_signal(history, el=2000):
+    config = history["config"]
     N = config["N"]
-    save_path = os.path.join("output",config["model_name"],"signal.png")
 
-    plt.figure(figsize=(8,6))
-    plt.plot(U[:el], label="true")
-    plt.plot(y_pred[:el], label="pred")
-    plt.xlim(0,min(el, len(U)))
-    plt.xlabel("Timestep")
-    plt.ylabel("Voltage")
-    plt.title(f"Simulated vs True (N={N} blocks)")
-    plt.legend()
+    best_seed = history["best_seed"]
+    folds = history["seeds"][best_seed]["folds"]
+
+    # Get the best fold index
+    loss_by_fold = [fold["val_loss"] for fold in folds]
+    best_fold_index = np.argmin(loss_by_fold)
+
+    params = folds[best_fold_index]["params"]
+    # params["Rs"] = jnp.log10(jnp.array(params["Rs"]))
+    # params["R"] = jnp.log10(jnp.array(params["R"]))
+    # params["C"] = jnp.log10(jnp.array(params["C"]))
+    # params["alpha"] = jnp.array(params["alpha"])
+
+    # Load and preprocess data
+    data = load_data("data", config["freq"])
+    fs = float(data["fs"])
+
+    I = correct_signal(decimate_signal(data["I"], fs, 2000))
+    U = decimate_signal(data["U1"], fs, 2000)
+
+    # Normalize and scale signals
+    I -= np.mean(I)
+    U -= np.mean(U)
+    I *= 200
+    U *= 200
+
+    # Simulate the predicted signal
+    y_pred = sim_z(I=I[:el], fs=config["fs"], **params)
+
+    # Save path for the plot
+    save_path = os.path.join("output", config["model_name"], "signal.png")
+
+    # Plot the true and predicted signals
+    plt.figure(figsize=(10, 6))
+    plt.plot(U[:el], label="True Signal", color="blue", linestyle="-")
+    plt.plot(y_pred[:el], label="Predicted Signal", color="orange", linestyle="-")
+    plt.xlim(0, min(el, len(U)))
+    plt.xlabel("Timestep", fontsize=12)
+    plt.ylabel("Voltage", fontsize=12)
+    plt.title(f"Simulated vs True Signal (N={N} blocks)", fontsize=14)
+    plt.legend(fontsize=10, loc="upper right")
+    plt.grid(True, linestyle="--", alpha=0.6)
     plt.tight_layout()
-    plt.savefig(save_path)
+    plt.savefig(save_path, dpi=300)
+    plt.close()
 
 
 def plot_all_losses(full_history, model_name):
