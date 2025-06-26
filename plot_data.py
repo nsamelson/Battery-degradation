@@ -13,45 +13,65 @@ from preprocess_data import *
 def plot_loss_curve(history):
 
     N = history["config"]["N"]
-    save_path = os.path.join("output",history["config"]["model_name"],"loss.png")
+    save_path = os.path.join("output", history["config"]["model_name"], "loss.png")
 
     best_seed = history["best_seed"]
     folds = history["seeds"][best_seed]["folds"]
     loss_by_fold = [fold["val_loss"] for fold in folds]
 
-    # get best fold loss
+    # Get best fold loss
     best_fold_index = np.argmin(loss_by_fold)
- 
-    # get progresses
+
+    # Get progresses
     losses = folds[best_fold_index]["train_losses"]
     val_losses = folds[best_fold_index]["val_losses"]
 
     train_cells = folds[0]["train_cells"]
     val_cell = folds[0]["val_cell"]
 
-    # --- plot loss curve ---
-    plt.figure(figsize=(6,4))
-    # avoid weird step labels that are not integers
-    step = max(1, len(losses) // 10)  # Adjust step size based on the number of items
+    # --- Plot loss curve ---
+    plt.figure(figsize=(8, 5))  # Slightly larger for better readability
+    step = max(2, len(losses) // 10)  # Adjust step size based on the number of items
     plt.xticks(np.arange(0, len(losses), step))
 
-    plt.plot(losses, label=f"Training Loss (cells [{','.join(train_cells)}])")
-    plt.plot(val_losses, label=f"Validation Loss (cell {val_cell})")
-    # plt.yscale('log')
-    plt.xlabel("Step")
-    plt.ylabel(f"Loss ({history['config']['loss_type']})")
-    plt.title(f"Training Loss (N={N} blocks)")
-    plt.legend()
+    plt.plot(losses, label=f"Training Loss (cells [{', '.join(train_cells)}])", linestyle="--", color="blue")
+    plt.plot(val_losses, label=f"Validation Loss (cell {val_cell})", linestyle="-", color="orange")
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.xlabel("Step", fontsize=12)
+    plt.ylabel(f"Loss ({history['config']['loss_type']})", fontsize=12)
+    plt.title(f"Training Loss (N={N} blocks)", fontsize=14)
+    plt.legend(fontsize=10, loc="upper right")
     plt.tight_layout()
-    plt.savefig(save_path)
+    plt.savefig(save_path, dpi=300)
+    plt.close()
 
-def plot_params_progress(params_progress: dict, losses: list, config: dict, params_to_plot=["R", "Rs", "C", "alpha"]):
+def plot_params_progress(history, params_to_plot=["R", "Rs", "C", "alpha"]):
+    """
+    Plots the progression of parameters and loss during training.
+
+    Args:
+        history (dict): Training history containing parameter progress and losses.
+        params_to_plot (list): List of parameter names to plot.
+    """
+    config = history["config"]
     N = config["N"]
+
+    best_seed = history["best_seed"]
+    folds = history["seeds"][best_seed]["folds"]
+    loss_by_fold = [fold["val_loss"] for fold in folds]
+
+    # Get the best fold index
+    best_fold_index = np.argmin(loss_by_fold)
+    losses = folds[best_fold_index]["train_losses"]
+    val_losses = folds[best_fold_index]["val_losses"]
+    params_progress = folds[best_fold_index]["params_progress"]
+
     save_path = os.path.join("output", config["model_name"], "params_over_loss.png")
 
-    fig, axs = plt.subplots(2, 2, figsize=(10, 6), sharex=True)
+    # Create subplots
+    fig, axs = plt.subplots(2, 2, figsize=(8, 6), sharex=True)
     axs = axs.flatten()
-    
+
     param_groups = {
         "R": 0,
         "Rs": 0,
@@ -59,7 +79,7 @@ def plot_params_progress(params_progress: dict, losses: list, config: dict, para
         "alpha": 2
     }
 
-    titles = ["R and Rs (log-scale)", "C (log-scale)", "Alpha", "Loss only"]
+    titles = ["R and Rs (log-scale)", "C (log-scale)", "Alpha", "Loss"]
 
     for pname in params_to_plot:
         if pname not in params_progress:
@@ -74,23 +94,31 @@ def plot_params_progress(params_progress: dict, losses: list, config: dict, para
         for i in range(param_array.shape[1]):
             values = param_array[:, i]
             if pname in ["R", "Rs", "C"]:
-                values = 10**values  # Stabilize / preserve scale
+                values = 10**values  # Convert to original scale
                 ax.set_yscale("log")
             ax.plot(values, label=f"{pname}[{i}]", linestyle="--")
 
-    # Plot loss in all subplots
-    for i in range(4):
-        if i == 3:
-            axs[i].plot(losses, label="Loss", color="black")
-        axs[i].set_title(titles[i])
-        axs[i].legend()
-        axs[i].set_xlabel("Step")
-        if i in [0, 2]:
-            axs[i].set_ylabel("Value")
+    # Plot losses in the last subplot
+    axs[3].plot(losses, label="Train Loss", color="blue", linestyle="--")
+    axs[3].plot(val_losses, label="Validation Loss", color="orange", linestyle="-")
 
-    fig.suptitle(f"Training Loss and Parameters (N={N} blocks)", fontsize=14)
+    # Configure subplots
+    for i, ax in enumerate(axs):
+        ax.set_title(titles[i])
+        ax.legend(fontsize=8)
+        ax.grid(True, linestyle="--", alpha=0.6)
+        if i >= 2:  # Bottom row
+            ax.set_xlabel("Step")
+        if i % 2 == 0:  # Left column
+            ax.set_ylabel("Value")
+
+        step = max(2, len(losses) // 10)  # Adjust step size for x-axis ticks
+        ax.set_xticks(np.arange(0, len(losses), step))
+
+    # Add a global title and save the figure
+    fig.suptitle(f"Training Loss and Parameter Progression (N={N} blocks)", fontsize=16)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
-    fig.savefig(save_path)
+    fig.savefig(save_path, dpi=300)
     plt.close()
 
 def plot_signal(U, y_pred, config:dict, el):
