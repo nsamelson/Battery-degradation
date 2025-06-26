@@ -148,117 +148,27 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, start_s
     
     print(f"Saved history of training into {dir_path}/history.json")
 
-    # # run training for each cell
-    # for i in range(len(U_cells)):
-    #     cell = cells[i]
-
-    #     # skip computing other cells for now
-    #     if i>=1:
-    #         continue
-
-    #     print(f"Training on cell {cell}...")
-
-    #     # setup U_val as all U cells except U1, when U_train is U_1 only
-    #     U_train = U_cells[i]
-    #     U_val = U_cells[:i] + U_cells[i+1:] if cell == "U1" else None
-
-    #     # setup best seed tracking
-    #     best_seed_loss = float('inf')
-    #     best_seed_params = None
-    #     best_seed_params_progress = {}
-    #     best_seed_losses = []
-    #     best_seed_val_losses = []
-    #     best_seed = 0
-
-    #     history[cell] = {}
-
-    #     for s in range(n_seeds + 1):
-    #         if s in bad_seeds:
-    #             continue
-            
-    #         # generate random params if seed != 0
-    #         rng_key = jax.random.PRNGKey(s)
-    #         init_params = preprocess.sample_params(key=rng_key, N=N)
-    #         p = params if s==0 else init_params.copy()
-
-    #         # Pilot run
-    #         pilot_loss = compute_loss(p, I, U_train, fs)
-    #         if pilot_loss > best_seed_loss * 1000:
-    #             print(f"Seed {s} is worse than best seed loss by {pilot_loss // best_seed_loss} times: {pilot_loss:.4f} vs {best_seed_loss:.4f}, skipping.")
-    #             bad_seeds.add(s)
-    #             continue
-
-    #         # full run
-    #         # TODO: maybe send the best seed loss within the train loop and break if after x epochs we see still a big difference
-    #         trained_params, losses, avg_val_losses, params_progress = train.train_loop(p, I, U_train, fs, U_val, num_steps=iters,minibatch=minibatch,opt_type=optimizer)
-
-    #         # compute metrics
-    #         loss = compute_loss(trained_params,I, U_train, fs)
-    #         print(f"Seed {s}: Last training loss: {losses[-1]}, Loss: {loss}, best seed loss: {best_seed_loss}")
-
-    #         if not jnp.isfinite(loss):
-    #             bad_seeds.add(s)
-    #             continue
-
-    #         # skip seeds if loss is 10* larger than the best loss
-    #         if loss > best_seed_loss * 50:
-    #             print(f"Seed {s} is worse than best seed loss by {loss // best_seed_loss} times, {loss:.4f} vs {best_seed_loss:.4f}, skipping.")
-    #             bad_seeds.add(s)
-    #             continue
-                
-    #         if "trainings" not in history[cell]:
-    #             history[cell]["trainings"] = []
-
-    #         history[cell]["trainings"].append({
-    #             "seed": s,
-    #             "init_params": preprocess.log_to_exp(p),
-    #             "params": preprocess.log_to_exp(trained_params),
-    #             "loss":loss,
-    #         })
-
-    #         if loss < best_seed_loss:
-    #             best_seed_loss = loss
-    #             best_seed_params = trained_params
-    #             best_seed_params_progress = params_progress
-    #             best_seed_losses = losses
-    #             best_seed = s
-    #             if cell == "U1":
-    #                 best_seed_val_losses = avg_val_losses
-
-    #     bic = compute_bic(len(U_train),best_seed_loss,3*N+1)
-
-    #     history[cell]["best_seed"] = {
-    #         "losses": best_seed_losses,
-    #         "params": preprocess.log_to_exp(best_seed_params),
-    #         "params_progress": best_seed_params_progress,
-    #         "loss": best_seed_loss,
-    #         "seed": best_seed,
-    #         "bic": bic
-    #     }
-
-    #     if cell == "U1":
-    #         avg_loss = jnp.mean(jnp.array([compute_loss(trained_params,I, U_cell, fs)for U_cell in U_val]))
-    #         history["avg_best_seed"] = {
-    #             "losses": best_seed_val_losses,
-    #             "loss":avg_loss,
-    #             "bic": compute_bic(len(U_train),avg_loss,3*N+1),
-    #             "aic": compute_aic(len(U_train),avg_loss,3*N+1)
-    #         }
-
-
-    # history["config"]= {
-    #     "model_name": model_name,
-    #     "path": os.path.join(work_dir, "output"),
-    #     "best_seed": best_seed,
-    #     "freq":freq,
-    #     "debug":debug,
-    #     "sampling_frequency": sampling_frequency,
-    #     "fs": fs,
-    #     "N":N
-    # }
 
     
+def join_experiments(model_name, start_seed_indices=[]):
+    work_dir = os.getcwd()
+    dir_path = os.path.join(work_dir, "output", model_name)
+    history = {"config": {}, "seeds": []}
 
+    for s in start_seed_indices:
+        with open(f"{dir_path}/history_{s}.json", "r") as infile:
+            seed_history = json.load(infile)
+            if not history["config"]:
+                history["config"] = seed_history["config"]
+            history["seeds"].extend(seed_history["seeds"])
+
+    # Find the best seed
+    best_seed = min(history["seeds"], key=lambda x: x["avg_val_loss"])
+    history["best_seed"] = best_seed["seed"]
+    print(f"Best seed overall: {history['best_seed']} with avg val loss {best_seed['avg_val_loss']:.4f}")
+
+    with open(f"{dir_path}/history.json", "w") as outfile:
+        json.dump(load_data.clean_for_json(history), outfile)
 
 
 
@@ -298,3 +208,6 @@ if __name__ == "__main__":
         loss_type=args.loss,
         loco_cv=args.loco_cv
     )
+
+    # If you want to join multiple experiments, uncomment the line below and specify the start seed indices
+    # join_experiments(model_name, start_seed_indices=[0,25,50,75])
