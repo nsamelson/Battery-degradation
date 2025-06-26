@@ -131,12 +131,13 @@ def plot_signal(history, el=2000):
     # Get the best fold index
     loss_by_fold = [fold["val_loss"] for fold in folds]
     best_fold_index = np.argmin(loss_by_fold)
-
     params = folds[best_fold_index]["params"]
-    # params["Rs"] = jnp.log10(jnp.array(params["Rs"]))
-    # params["R"] = jnp.log10(jnp.array(params["R"]))
-    # params["C"] = jnp.log10(jnp.array(params["C"]))
-    # params["alpha"] = jnp.array(params["alpha"])
+
+    # weird thing is happening, sometimes I need it sometimes not
+    params["Rs"] = jnp.log10(jnp.array(params["Rs"]))
+    params["R"] = jnp.log10(jnp.array(params["R"]))
+    params["C"] = jnp.log10(jnp.array(params["C"]))
+    params["alpha"] = jnp.array(params["alpha"])    
 
     # Load and preprocess data
     data = load_data("data", config["freq"])
@@ -158,13 +159,13 @@ def plot_signal(history, el=2000):
     save_path = os.path.join("output", config["model_name"], "signal.png")
 
     # Plot the true and predicted signals
-    plt.figure(figsize=(10, 6))
+    plt.figure(figsize=(8, 5))
     plt.plot(U[:el], label="True Signal", color="blue", linestyle="-")
-    plt.plot(y_pred[:el], label="Predicted Signal", color="orange", linestyle="-")
+    plt.plot(y_pred[:el], label="Simulated Signal", color="orange", linestyle="-")
     plt.xlim(0, min(el, len(U)))
     plt.xlabel("Timestep", fontsize=12)
     plt.ylabel("Voltage", fontsize=12)
-    plt.title(f"Simulated vs True Signal (N={N} blocks)", fontsize=14)
+    plt.title(f"Simulated vs True Signal Response (N={N} blocks)", fontsize=14)
     plt.legend(fontsize=10, loc="upper right")
     plt.grid(True, linestyle="--", alpha=0.6)
     plt.tight_layout()
@@ -187,12 +188,16 @@ def plot_all_losses(full_history, model_name):
     plt.legend()
     plt.tight_layout()
     plt.savefig(save_path)
+    plt.close()
 
 def plot_param_evolution(history, param_names=["R", "C", "alpha"], cell="U1"):
     save_path = os.path.join("output", history["config"]["model_name"], "params_evolution.png")
-    data = history[cell]["trainings"]
     config = history["config"]
     N = config["N"]
+    # data = history[cell]["trainings"]
+    seeds = history["seeds"]
+    best_seed = history["best_seed"]
+    trainings = {seed["seed"]:fold["params_progress"] for seed in seeds for fold in seed["folds"] if fold["val_cell"] == cell}
 
     fig, axes = plt.subplots(len(param_names), N, figsize=(4*N, 3 * len(param_names)), squeeze=False)
     axes = np.atleast_2d(axes)
@@ -203,23 +208,29 @@ def plot_param_evolution(history, param_names=["R", "C", "alpha"], cell="U1"):
     for i, pname in enumerate(param_names):
         for j in range(N):
             ax = axes[i][j]
-            for entry in data:
-                init = entry["init_params"][pname]
-                final = entry["params"][pname]
+            for k, entry in trainings.items():
+                # init = entry["init_params"][pname]
+                # final = entry["params"][pname]
+                init = entry[pname][0]
+                final = entry[pname][-1]
 
-                init = init if isinstance(init, list) else [init]
-                final = final if isinstance(final, list) else [final]
+                init = init[j] if isinstance(init, list) else [init]
+                final = final[j] if isinstance(final, list) else [final]
 
-                if j >= len(init) or j >= len(final):
-                    continue
+                # if j >= len(init) or j >= len(final):
+                #     continue
 
                 if pname in ["R","C"]:
                     ax.set_yscale("log")
+                    init = 10**init
+                    final = 10** final
 
-                line,= ax.plot([0, 1], [init[j], final[j]], marker='o',linestyle="--", label=f"Seed {entry['seed']}")
+                best_comm = " (best)" if k== best_seed else ""
+
+                line,= ax.plot([0, 1], [init,final], marker='o',linestyle="--", label=f"Seed {k}")
                 if i == 0 and j == 0:  # Collect legend items only from first subplot
                     all_handles.append(line)
-                    all_labels.append(f"Seed {entry['seed']}")
+                    all_labels.append(f"Seed {k}{best_comm}")
 
 
             if i==0:
@@ -280,66 +291,61 @@ if __name__ == "__main__":
 
     # ------ Parameters ------
     freq = 10
-    model_name = "caparange"
+    model_name = "params_search"
     full_hist = {}
 
 
     for N in range(1,7):
         path = f"output/{model_name}_{N}_blocks_10_hz/"
-        with open(os.path.join(path,"history.json"), "r") as f:
-            history = json.load(f)
+
+        try:
+            with open(os.path.join(path,"history.json"), "r") as f:
+                history = json.load(f)
+        except:
+            continue
+
+        best_seed = history["best_seed"]
+        folds = history["seeds"][best_seed]["folds"]
+        loss_by_fold = [fold["val_loss"] for fold in folds]
+
+        # get best fold loss and BIC
+        avg_val_loss = history["seeds"][best_seed]["avg_val_loss"]
+        best_loss = min(loss_by_fold)
+        best_fold_index = loss_by_fold.index(best_loss)
+        best_bic = folds[best_fold_index]["bic"]
+        print(f"N={N}, Seed: {best_seed}, Avg loss: {avg_val_loss:.4f}, Min loss: {best_loss:.4f}, BIC: {best_bic:.2f}")
+
+        # get progresses
+        losses = folds[best_fold_index]["train_losses"]
+        val_losses = folds[best_fold_index]["val_losses"]
+        params_progress = folds[best_fold_index]["params_progress"]
 
 
-        losses = history["U1"]["best_seed"]["losses"]
-        params_progress = history["U1"]["best_seed"]["params_progress"]
-        avg_losses = history["avg_best_seed"]["losses"]
 
         config = history["config"]
         config["N"] = N
 
-        plot_loss_curve(losses,avg_losses,config)
-        plot_params_progress(params_progress,losses,config)
-        plot_param_evolution(history)
+        plot_loss_curve(history)
+        plot_params_progress(history)
+        plot_signal(history)
+        
+        plot_param_evolution(history)        
+        plot_loss_vs_parameter(history, parameter_name="Rs")
 
-        # get stuff from hist
-        best_loss = history["avg_best_seed"]["loss"]
-        best_bic = history["avg_best_seed"]["bic"]
-        best_aic = history["avg_best_seed"]["aic"]
-        params = history["U1"]["best_seed"]["params"]
+        # # get stuff from hist
+        params = folds[best_fold_index]["params"]
         params["Rs"] = jnp.log10(jnp.array(params["Rs"]))
         params["R"] = jnp.log10(jnp.array(params["R"]))
         params["C"] = jnp.log10(jnp.array(params["C"]))
         params["alpha"] = jnp.array(params["alpha"])
-
-        # get data
-        data = load_data("data", freq)
-        fs = float(data["fs"])
-
-        # decimate and correct offset
-        I = correct_signal(decimate_signal(data["I"],fs,2000))
-        U = decimate_signal(data["U1"],fs,2000)
-
-        # normalise
-        I -= jnp.mean(I)
-        U -= jnp.mean(U)
-
-        # scale up
-        I *= 200
-        U *= 200
-        # print(I, U)
-
-        # plot signal
-        y_pred = sim_z(I=I[:2000],fs=config["fs"], **params)
-
-        # y_pred *= 200
-
-        plot_signal(U, y_pred, config, 2000)
+  
 
 
-        print(f"{N} blocks: Loss={best_loss:.5f}, BIC={best_bic:.2f}, AIC={best_aic:.2f}")
+
+        # print(f"{N} blocks: Loss={best_loss:.5f}, BIC={best_bic:.2f}, AIC={best_aic:.2f}")
         full_hist[N] = {
             "losses": losses,
-            "avg_losses":avg_losses,
+            "avg_losses":val_losses,
             "params":params
         }
 
