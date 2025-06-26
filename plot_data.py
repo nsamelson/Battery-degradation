@@ -10,18 +10,36 @@ from models import sim_z
 from preprocess_data import *
 
 
-def plot_loss_curve(losses: list, avg_losses:list, config:dict):
+def plot_loss_curve(history):
 
-    N = config["N"]
-    save_path = os.path.join("output",config["model_name"],"loss.png")
+    N = history["config"]["N"]
+    save_path = os.path.join("output",history["config"]["model_name"],"loss.png")
+
+    best_seed = history["best_seed"]
+    folds = history["seeds"][best_seed]["folds"]
+    loss_by_fold = [fold["val_loss"] for fold in folds]
+
+    # get best fold loss
+    best_fold_index = np.argmin(loss_by_fold)
+ 
+    # get progresses
+    losses = folds[best_fold_index]["train_losses"]
+    val_losses = folds[best_fold_index]["val_losses"]
+
+    train_cells = folds[0]["train_cells"]
+    val_cell = folds[0]["val_cell"]
 
     # --- plot loss curve ---
     plt.figure(figsize=(6,4))
-    plt.plot(losses, label="best training loss")
-    plt.plot(avg_losses, label="avg loss (all cells)")
+    # avoid weird step labels that are not integers
+    step = max(1, len(losses) // 10)  # Adjust step size based on the number of items
+    plt.xticks(np.arange(0, len(losses), step))
+
+    plt.plot(losses, label=f"Training Loss (cells [{','.join(train_cells)}])")
+    plt.plot(val_losses, label=f"Validation Loss (cell {val_cell})")
     # plt.yscale('log')
     plt.xlabel("Step")
-    plt.ylabel("MSE Loss")
+    plt.ylabel(f"Loss ({history['config']['loss_type']})")
     plt.title(f"Training Loss (N={N} blocks)")
     plt.legend()
     plt.tight_layout()
