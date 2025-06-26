@@ -10,7 +10,7 @@ import preprocess_data as preprocess
 import train
 
 
-def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibatch, optimizer, loss_type="MSE"):
+def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, start_seed, minibatch, optimizer, loss_type="MSE", loco_cv=True):
     work_dir = os.getcwd()
     el = 4000
     cells = ["U1","U2","U4","U5","U6"] # exclude U3
@@ -60,7 +60,7 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
         "seeds": []
     }
 
-    for s in range(n_seeds + 1):
+    for s in range(start_seed, start_seed + n_seeds + 1):
 
         rng_key = jax.random.PRNGKey(s)
         init_params = base_params if s == 0 else preprocess.sample_params(key=rng_key, N=N)
@@ -70,7 +70,8 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
         val_losses = []
 
         # Leave-One-Cell-Out Cross-Validation
-        for val_cell in cells:
+        loco_cells = cells if loco_cv else ["U1"]
+        for val_cell in loco_cells:
             train_cells = [c for c in cells if c != val_cell] # leave one cell out for val
             U_train = [U_cells[c] for c in train_cells]
             U_val = U_cells[val_cell]
@@ -78,6 +79,9 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
             # pilot loss
             try:
                 pilot_loss = compute_loss(init_params.copy(), I, U_val, fs, loss_code =loss_code )
+                if not jnp.isfinite(pilot_loss):
+                    print(f"🚫 Pilot loss is NaN or inf at seed {s}, skipping.")
+                    break
             except:
                 print("Seed unstable, skip")
                 break
@@ -85,18 +89,27 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
             if s > 0 and pilot_loss > 100 * best_avg_val_loss:
                 print(f"🚫 Skipping bad seed {s} (pilot val loss {pilot_loss:.2e} vs {best_avg_val_loss:.2e})")
                 break
+            
+            try:
+                trained_params, train_losses, val_losses_progress, params_progress = train.train_loop(
+                    init_params.copy(), I, U_train, fs, U_val,
+                    num_steps=iters, minibatch=minibatch, opt_type=optimizer, loss_code =loss_code 
+                )
+            except Exception as e:
+                print(f"❌ Exception in training seed {s}, val cell {val_cell}: {e}")
+                break
 
-            trained_params, train_losses, val_losses_progress, params_progress = train.train_loop(
-                init_params.copy(), I, U_train, fs, U_val,
-                num_steps=iters, minibatch=minibatch, opt_type=optimizer, loss_code =loss_code 
-            )
 
             if not train_losses:
                 print("Seed became unstable while training, skip")
                 break
-
-            val_loss = compute_loss(trained_params, I, U_val, fs, loss_code =loss_code )
-            val_losses.append(val_loss)
+            
+            try:
+                val_loss = compute_loss(trained_params.copy(), I, U_val, fs, loss_code =loss_code )
+                val_losses.append(val_loss)
+            except:
+                print(f"🚫 Validation loss is NaN or inf at seed {s}, skipping.")
+                break
 
             seed_result["folds"].append({
                 "val_cell": val_cell,
@@ -114,21 +127,24 @@ def main(model_name, N, iters, freq, debug, sampling_frequency, n_seeds, minibat
         seed_result["avg_val_loss"] = avg_val_loss
         history["seeds"].append(seed_result)
 
-
         # Track best
         if avg_val_loss < best_avg_val_loss:
             best_avg_val_loss = avg_val_loss
             best_seed_overall = s
+        
+        history["best_seed"] = best_seed_overall
 
-    history["best_seed"] = best_seed_overall
+        # Save incrementally
+        dir_path = os.path.join(work_dir, "output", model_name)
+        os.makedirs(dir_path, exist_ok=True)
+        with open(f"{dir_path}/history_{start_seed}.json", "w") as outfile:
+            json.dump(load_data.clean_for_json(history), outfile)
 
     # save history
-    dir_path = os.path.join(work_dir,"output",model_name)
-    os.makedirs(dir_path, exist_ok=True)
-    
-
-    with open(f"{dir_path}/history.json", "w") as outfile: 
-        json.dump(load_data.clean_for_json(history), outfile)
+    # dir_path = os.path.join(work_dir,"output",model_name)
+    # os.makedirs(dir_path, exist_ok=True)
+    # with open(f"{dir_path}/history.json", "w") as outfile: 
+    #     json.dump(load_data.clean_for_json(history), outfile)
     
     print(f"Saved history of training into {dir_path}/history.json")
 
@@ -257,9 +273,11 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--debug", action="store_true", help="debug")
     parser.add_argument("-s", "--sampling_frequency", help="Reduce sampling frequency for faster simulation",default=20)
     parser.add_argument("-rs","--random_seeds",help="Number of random seeds to explore",default=100)
+    parser.add_argument("-ss","--start_seed",help="Seed index to start",default=0)
     parser.add_argument("-m", "--minibatch", action="store_true", help="minibatch the process")
     parser.add_argument("-o", "--optimizer", choices=["adam","adamw",], help="optimizer type",default="adam")
     parser.add_argument("-l", "--loss", choices=["MSE","RMSE","MAPE","CAE","CSE"], help="loss type",default="MSE")
+    parser.add_argument("-cv", "--loco_cv", action="store_true", help="apply leave one cell out cross validation")
 
     args = parser.parse_args()
 
@@ -274,7 +292,9 @@ if __name__ == "__main__":
         debug=args.debug, 
         sampling_frequency=int(args.sampling_frequency),
         n_seeds = int(args.random_seeds),
+        start_seed= int(args.start_seed),
         minibatch=args.minibatch,
         optimizer=args.optimizer,
-        loss_type=args.loss
+        loss_type=args.loss,
+        loco_cv=args.loco_cv
     )
