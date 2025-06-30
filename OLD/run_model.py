@@ -53,7 +53,8 @@ def compute_log_likelihood(mse, n):
 
 def cumulative_absolute_error(y_true, y_pred):
     errors = np.abs(y_true - y_pred)
-    return np.cumsum(errors)[-1]
+    # return np.cumsum(errors)[-1]# this is really stupid
+    return np.sum(errors)
 
 
 def reduce_sampling(I, y, original_fss, target_fss, duration_s):
