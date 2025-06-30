@@ -17,9 +17,9 @@ This project explores battery degradation modelling using an equivalent circuit 
 - BIC was not suitable as a model selection metric due to the large number of data points relative to model parameters.
 
 <div style="display: flex; justify-content: space-around;">
-    <img src="plots/params_search_losses_trend.png" alt="Figure 1" style="width: 33%;">
-    <img src="plots/params_search_losses.png" alt="Figure 2" style="width: 33%;">
-    <img src="plots/params_search_val_losses_vs_BIC.png" alt="Figure 3" style="width: 33%;">
+    <img src="plots/params_search_losses_trend.png" alt="Figure 1" style="width: 30%;">
+    <img src="plots/params_search_losses.png" alt="Figure 2" style="width: 30%;">
+    <img src="plots/params_search_val_losses_vs_BIC.png" alt="Figure 3" style="width: 30%;">
 </div>
 
 
