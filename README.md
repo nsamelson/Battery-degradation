@@ -13,11 +13,17 @@ This project explores battery degradation modelling using an equivalent circuit 
 - **Cumulative Absolute Error (CAE)** served as the primary loss metric.
 
 ## Key Findings
-
 - Two RC blocks already provide a good fit to the data, with diminishing improvements beyond that.
 - BIC was not suitable as a model selection metric due to the large number of data points relative to model parameters.
 
-Plots and figures from the experiments are available in the branch [plots](https://github.com/nsamelson/Battery-degradation/tree/plots/plots).
+<div style="display: flex; justify-content: space-around;">
+    <img src="plots/params_search_losses_trend.png" alt="Figure 1" style="width: 33%;">
+    <img src="plots/params_search_losses.png" alt="Figure 2" style="width: 33%;">
+    <img src="plots/params_search_val_losses_vs_BIC.png" alt="Figure 3" style="width: 33%;">
+</div>
+
+
+More plots and figures from the experiments are available in the branch [plots](https://github.com/nsamelson/Battery-degradation/tree/plots/plots).
 
 ## Future Work
 
