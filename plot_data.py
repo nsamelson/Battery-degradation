@@ -508,15 +508,15 @@ if __name__ == "__main__":
         config = history["config"]
         config["N"] = N
 
-        # plot_loss_curve(history.copy())
-        # plot_params_progress(history.copy())
-        # plot_signal(history.copy())
+        plot_loss_curve(history.copy())
+        plot_params_progress(history.copy())
+        plot_signal(history.copy())
         
-        # plot_param_evolution(history.copy())        
-        # plot_loss_vs_parameter(history.copy(), parameter_name="R")
-        # plot_loss_vs_parameter(history.copy(), parameter_name="Rs")
-        # plot_loss_vs_parameter(history.copy(), parameter_name="C")
-        # plot_loss_vs_parameter(history.copy(), parameter_name="alpha")
+        plot_param_evolution(history.copy())        
+        plot_loss_vs_parameter(history.copy(), parameter_name="R")
+        plot_loss_vs_parameter(history.copy(), parameter_name="Rs")
+        plot_loss_vs_parameter(history.copy(), parameter_name="C")
+        plot_loss_vs_parameter(history.copy(), parameter_name="alpha")
 
         # # get stuff from hist
         params = folds[best_fold_index]["params"]
