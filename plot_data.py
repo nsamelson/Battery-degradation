@@ -206,6 +206,43 @@ def plot_all_losses(full_history, model_name):
         plt.savefig(save_path, dpi=300)
         plt.close()
 
+def plot_val_losses_vs_BIC(full_history, model_name):
+    """
+    Plots validation losses and BIC for each N in the full history.
+
+    Args:
+        full_history (dict): Dictionary containing training history for different N values.
+        model_name (str): Name of the model for saving the plot.
+    """
+    save_path = os.path.join("output", f"{model_name}_val_losses_vs_BIC.png")
+
+    # Extract N values, validation losses, and BICs
+    N_values = sorted(full_history.keys())
+    val_losses = [full_history[N]["best_loss"] for N in N_values]
+    bics = [full_history[N]["best_bic"] for N in N_values]
+
+    # Create the plot
+    fig, ax1 = plt.subplots(figsize=(6, 4))
+
+    # Plot validation loss on the left y-axis
+    ax1.plot(N_values, val_losses, color="orangered", marker="o", linestyle="-", label="Validation Loss")
+    ax1.set_xlabel("Number of Blocks (N)", fontsize=12)
+    ax1.set_ylabel("Val Loss (CAE)", color="orangered", fontsize=12)
+    ax1.tick_params(axis="y", labelcolor="orangered")
+    ax1.grid(True, linestyle="-", alpha=0.6)
+
+    # Plot BIC on the right y-axis
+    ax2 = ax1.twinx()
+    ax2.plot(N_values, bics, color="royalblue", marker="x", linestyle="--", label="BIC", alpha=1)
+    ax2.set_ylabel("BIC", color="royalblue", fontsize=12)
+    ax2.tick_params(axis="y", labelcolor="royalblue")
+
+    # Add a title and save the figure
+    plt.title("Validation Loss and BIC vs Number of Blocks (N)", fontsize=14)
+    fig.tight_layout()
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+
 def plot_param_evolution(history, param_names=["R", "C", "alpha"], cell="U1"):
     """
     Plots the evolution of parameters from initialization to trained values for each block.
@@ -416,7 +453,7 @@ def plot_best_loss_per_N(full_history, model_name):
         line_kws={"color": "royalblue", "label": "Trend"}, 
         order=2
     )
-    plt.plot(N_values, best_losses, marker="o", linestyle="--", color="red", label="Best Seeds")
+    plt.plot(N_values, best_losses, marker="o", linestyle="--", color="orangered", label="Best Seeds")
 
     # Configure plot
     plt.grid(True, linestyle="--", alpha=0.6)
@@ -483,6 +520,8 @@ if __name__ == "__main__":
 
         # # get stuff from hist
         params = folds[best_fold_index]["params"]
+        print(f"Best params for N={N}: {params}")
+
         params["Rs"] = jnp.log10(jnp.array(params["Rs"]))
         params["R"] = jnp.log10(jnp.array(params["R"]))
         params["C"] = jnp.log10(jnp.array(params["C"]))
@@ -511,3 +550,4 @@ if __name__ == "__main__":
     # Call the function to plot best loss per N
     plot_best_loss_per_N(full_hist, model_name)
     plot_all_losses(full_hist,model_name)
+    plot_val_losses_vs_BIC(full_hist, model_name)
