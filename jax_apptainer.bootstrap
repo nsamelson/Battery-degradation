@@ -1,0 +1,36 @@
+bootstrap: docker
+#From: nvidia/cuda:11.3.0-devel-ubuntu22.04
+#From: nvidia/cuda:12.0.0-runtime-ubuntu22.04
+#From: nvidia/cuda:11.8.0-runtime-ubuntu22.04
+#From: nvidia/cuda
+From: nvidia/cuda:12.2.2-runtime-ubuntu22.04
+
+#export APPTAINER_CACHEDIR=/data/tmp
+#export APPTAINER_TMPDIR=/data/tmp/app_tmp
+#sudo -E apptainer build <NAME>.sif <NAME>.bootstrap 
+
+%post
+    # Downloads the latest package lists (important).
+    apt-get update -y
+    # Runs apt-get while ensuring that there are no user prompts that would
+    # cause the build process to hang.
+    # python3-tk is required by matplotlib.
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        python3 \
+        python3-pip
+    # Reduce the size of the image by deleting the package lists we downloaded,
+    # which are useless now.
+    rm -rf /var/lib/apt/lists/*
+    # Install Python modules.
+    pip install --upgrade pip
+    # Note: wheels only available on linux.
+    pip install -U "jax[cuda12]"
+    pip3 install pandas
+    pip3 install scikit-learn
+    pip3 install nltk
+    pip3 install dm-haiku
+    pip3 install flax
+    pip3 install h5py
+    pip3 install ray[tune]
+    pip3 install hyperopt
+    pip3 install matplotlib
